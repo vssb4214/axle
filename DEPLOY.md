@@ -41,7 +41,9 @@ git push -u origin main
 ## 3. Supabase (already done)
 
 - Your database and auth are already on Supabase.
-- In Supabase **Authentication → URL Configuration**, add your Vercel URL to **Redirect URLs** (e.g. `https://your-project.vercel.app/**`) so auth redirects work after login.
+- **Authentication → Providers**: ensure **Email** is enabled so sign in / sign up works.
+- **Authentication → URL Configuration**: add your Vercel URL to **Redirect URLs** (e.g. `https://your-project.vercel.app/**`) so auth redirects work after login.
+- (Optional) For faster local testing, you can turn off **Confirm email** under Email provider; leave it on for production.
 
 ---
 

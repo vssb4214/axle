@@ -1,12 +1,11 @@
 'use client';
 
 import { ReactNode } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import { SessionContextProvider } from '@supabase/auth-helpers-react';
 
+/**
+ * Optional wrapper for Supabase session context.
+ * Currently a passthrough; add @supabase/ssr or session provider when needed.
+ */
 export function SupabaseProvider({ children }: { children: ReactNode }) {
-  const supabase = createClientComponentClient();
-
-  return <SessionContextProvider supabaseClient={supabase}>{children}</SessionContextProvider>;
+  return <>{children}</>;
 }
-
