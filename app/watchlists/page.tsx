@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getCurrentUser, getSupabaseServer } from '@/lib/auth/server';
 import { createWatchlist, deleteWatchlist, toggleWatchlist } from './actions';
+import RunAlertsPanel from './run-alerts-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -109,6 +110,8 @@ export default async function WatchlistsPage() {
           <h2 className="text-sm font-semibold text-white">Your watchlists</h2>
           <span className="text-xs text-slate-400">{watchlists?.length ?? 0}</span>
         </div>
+
+        <RunAlertsPanel />
 
         {!watchlists?.length ? (
           <p className="mt-3 text-sm text-slate-400">No watchlists yet.</p>
