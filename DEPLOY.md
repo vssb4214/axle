@@ -7,7 +7,7 @@ Use this checklist when you're ready to host Axle on the internet.
 ## 1. Push code to GitHub
 
 ```bash
-cd /Users/surajbendi/Axle
+cd /Users/trap/axle
 git init
 git add .
 git commit -m "Initial Axle app"
