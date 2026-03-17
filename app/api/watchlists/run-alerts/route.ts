@@ -27,6 +27,13 @@ export async function GET(req: Request) {
 
     // NOTE: This is a stub runner for local/dev. It deliberately does NOT send notifications.
     // In production this should be protected (cron secret, internal auth, etc).
+    // Safety: refuse to run unless explicitly in local/dev mode.
+    if (process.env.AXLE_ENV !== 'local') {
+      throw new HttpError('Watchlists runner is disabled outside local/dev.', {
+        status: 403,
+        code: 'RUNNER_DISABLED'
+      });
+    }
 
     let q = supabaseAdmin.from('watchlists').select('*').eq('enabled', true);
     if (watchlistId) q = q.eq('id', watchlistId);
