@@ -22,5 +22,7 @@ export type ValuationResult = {
   confidence: number;
   comp_count: number;
   key_factors: string[];
+  /** True when the range was refined by the LLM within comp-based bounds. */
+  llm_refined?: boolean;
 };
 

@@ -16,6 +16,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </Link>
           <nav className="flex items-center gap-4 text-sm text-slate-300">
+            <Link href="/evaluate" className="hover:text-white">
+              Evaluate
+            </Link>
             <Link href="/browse" className="hover:text-white">
               Browse
             </Link>

@@ -1,7 +1,10 @@
+import Link from 'next/link';
 import { supabaseClient } from '@/lib/db/client';
 import { computeDeterministicValuation } from '@/lib/valuation/engine';
 import { collectComparableListings } from '@/lib/comps/fetchComps';
 import { ollamaExplainText } from '@/lib/ollama/client';
+import { getSuggestedTradeListings } from '@/lib/matching';
+import { saveValuation } from '@/lib/valuation/saveValuation';
 
 type Props = { params: { id: string } };
 
@@ -11,6 +14,15 @@ export default async function ListingDetailPage({ params }: Props) {
     .select('*, users(id, display_name, city, state, rating_avg, rating_count)')
     .eq('id', params.id)
     .single();
+
+  const { data: listingPhotos } = listing
+    ? await supabaseClient
+        .from('listing_photos')
+        .select('photo_url, sort_order')
+        .eq('listing_id', params.id)
+        .order('sort_order', { ascending: true })
+    : { data: [] };
+  const firstPhoto = listingPhotos?.[0]?.photo_url;
 
   if (!listing) {
     return <div className="card w-full p-6 text-sm text-slate-300">Listing not found.</div>;
@@ -25,7 +37,16 @@ export default async function ListingDetailPage({ params }: Props) {
     state: listing.state
   };
 
-  const { comps, errors } = await collectComparableListings(query);
+  let comps: Awaited<ReturnType<typeof collectComparableListings>>['comps'] = [];
+  let errors: Awaited<ReturnType<typeof collectComparableListings>>['errors'] = [];
+  try {
+    const result = await collectComparableListings(query);
+    comps = result.comps;
+    errors = result.errors;
+  } catch {
+    comps = [];
+    errors = [{ source: 'system', message: 'Could not fetch comparables.' }];
+  }
 
   const valuation = computeDeterministicValuation(
     {
@@ -73,21 +94,51 @@ export default async function ListingDetailPage({ params }: Props) {
     }
   }
 
+  if (valuation) {
+    try {
+      await saveValuation(
+        params.id,
+        valuation,
+        comps,
+        explanation?.summary ?? null,
+        explanation?.bullets ?? valuation.key_factors,
+        explanation?.warnings ?? []
+      );
+    } catch {
+      // non-blocking
+    }
+  }
+
   const bestComps = comps.slice(0, 10);
+  const suggestedTrades = await getSuggestedTradeListings(params.id, listing.user_id, 5);
 
   return (
     <div className="flex w-full flex-col gap-6 md:flex-row">
       <div className="flex-1 space-y-4">
         <div className="card overflow-hidden">
-          <div className="aspect-video w-full bg-slate-800/70" />
+          <div className="aspect-video w-full bg-slate-800/70">
+            {firstPhoto ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={firstPhoto}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            ) : null}
+          </div>
         </div>
         <div className="card p-4">
           <h1 className="text-lg font-semibold text-white">
             {listing.year} {listing.make} {listing.model} {listing.trim}
           </h1>
           <p className="mt-1 text-xs text-slate-400">
-            {listing.mileage.toLocaleString()} mi • {listing.transmission} • {listing.drivetrain} •{' '}
-            {listing.city}, {listing.state}
+            {listing.mileage?.toLocaleString() ?? '—'} mi
+            {[listing.transmission, listing.drivetrain].filter(Boolean).length > 0 && (
+              <> • {[listing.transmission, listing.drivetrain].filter(Boolean).join(' • ')}</>
+            )}
+            {[listing.city, listing.state].filter(Boolean).length > 0 && (
+              <> • {[listing.city, listing.state].filter(Boolean).join(', ')}</>
+            )}
           </p>
           <p className="mt-2 text-xs text-slate-300">
             Condition: {listing.condition ?? 'unspecified'} • Title: {listing.title_status ?? 'unspecified'}
@@ -154,17 +205,24 @@ export default async function ListingDetailPage({ params }: Props) {
         <div className="card p-4">
           <h2 className="text-sm font-semibold text-white">Owner</h2>
           <p className="mt-1 text-xs text-slate-300">
-            {listing.users?.display_name ?? 'Enthusiast'} • {listing.users?.city}, {listing.users?.state}
+            {listing.users?.display_name ?? 'Enthusiast'}
+            {[listing.users?.city, listing.users?.state].filter(Boolean).length > 0 && (
+              <> • {[listing.users?.city, listing.users?.state].filter(Boolean).join(', ')}</>
+            )}
           </p>
           <p className="mt-1 text-xs text-slate-400">
             Rating:{' '}
             {listing.users?.rating_count
-              ? `${listing.users.rating_avg.toFixed(1)} / 5 (${listing.users.rating_count} reviews)`
+              ? `${Number(listing.users?.rating_avg ?? 0).toFixed(1)} / 5 (${listing.users.rating_count} reviews)`
               : 'No ratings yet'}
           </p>
           <div className="mt-3 flex gap-2">
-            <button className="btn-primary w-full text-xs">Offer Trade</button>
-            <button className="btn-secondary w-full text-xs">Message</button>
+            <Link href={`/listings/${params.id}/offer`} className="btn-primary w-full text-center text-xs">
+              Offer Trade
+            </Link>
+            <Link href={`/profile/${listing.user_id}`} className="btn-secondary w-full text-center text-xs">
+              View profile
+            </Link>
           </div>
         </div>
         <div className="card p-4">
@@ -210,6 +268,26 @@ export default async function ListingDetailPage({ params }: Props) {
             </p>
           )}
         </div>
+        {suggestedTrades.length > 0 && (
+          <div className="card p-4">
+            <h2 className="text-sm font-semibold text-white">Suggested trades</h2>
+            <p className="mt-1 text-xs text-slate-400">Other listings open to trade</p>
+            <ul className="mt-3 space-y-2">
+              {suggestedTrades.map((t) => (
+                <li key={t.id}>
+                  <Link
+                    href={`/listings/${t.id}`}
+                    className="block rounded-md bg-slate-900/80 p-2 text-xs text-slate-200 hover:bg-slate-800"
+                  >
+                    {t.year} {t.make} {t.model}
+                    {t.trim ? ` ${t.trim}` : ''} · {t.mileage?.toLocaleString()} mi
+                    {t.city && t.state && ` · ${t.city}, ${t.state}`}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </aside>
     </div>
   );

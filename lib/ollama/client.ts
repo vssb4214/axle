@@ -27,8 +27,12 @@ export async function ollamaChatJSON<T>(input: {
   };
 
   const res = await axios.post(`${OLLAMA_BASE_URL}/v1/chat/completions`, body, {
-    timeout: 60000
+    timeout: 25000,
+    validateStatus: () => true
   });
+  if (res.status !== 200) {
+    throw new Error(`Ollama returned ${res.status}`);
+  }
 
   const content = res.data.choices?.[0]?.message?.content;
   if (!content) {

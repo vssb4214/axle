@@ -53,13 +53,13 @@ ollama pull llama3.1
 
 3. Make sure the Ollama daemon is running (default `http://localhost:11434`).
 
-The app uses Ollama **only** for:
+The app uses Ollama for:
 
+- **Valuation refinement** (evaluate page): When `OLLAMA_BASE_URL` and a reasoning model are set, the evaluator runs a formula-based range first (segment-specific mileage/age, trim, condition, mods), then asks the LLM to refine the range *within strict comp-based bounds*. The LLM cannot invent prices outside the comparables.
 - Structuring messy listing text into JSON
-- Explaining deterministic valuations
-- (Later) match reasoning and scam heuristics
+- Explaining the valuation in plain English
 
-All numeric valuation ranges come from deterministic logic over real comps, not from the LLM.
+Without Ollama, the evaluator still returns a deterministic range using the same formula and variables; only the refinement and explanation steps are skipped.
 
 ### Development
 
@@ -92,4 +92,12 @@ Key routes:
 - Never fabricate comps; if a source fails or no comps exist, show that clearly and lower confidence.
 - Keep valuation explainable: show confidence scores, comp counts, and caveats when data is weak.
 - Treat Facebook Marketplace as experimental and optional (`lib/sources/facebook.ts`).
+
+### API / external connections
+
+| What | Required? | Notes |
+|------|----------|--------|
+| **Supabase** | Yes | Project URL + anon key + service role key in `.env.local`. No extra API keys. |
+| **Ollama** | No | Optional. If running locally, set `OLLAMA_BASE_URL` (default `http://localhost:11434`). Listing page works without it; valuation explanations are skipped if Ollama is down or missing. |
+| **Comps sources** | No | `lib/sources/*` (Craigslist, forums, BAT, Cars & Bids, Facebook) are stubbed. Add your own scraping or API integrations when you have keys or permission. No API keys needed for the app to run. |
 

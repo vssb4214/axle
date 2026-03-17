@@ -108,3 +108,49 @@ create table public.ratings (
   created_at timestamptz default now()
 );
 
+-- Manual valuations run from /evaluate (not tied to a specific listing)
+create table if not exists public.manual_valuations (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+
+  user_id uuid references public.users (id),
+
+  year integer not null,
+  make text not null,
+  model text not null,
+  trim text,
+  mileage integer not null,
+  condition text,
+  transmission text,
+  color text,
+  mods text,
+  wear text,
+  city text,
+  state text,
+
+  value_low integer not null,
+  value_mid integer not null,
+  value_high integer not null,
+  confidence real not null,
+  comp_count integer not null,
+  segment text
+);
+
+create index if not exists idx_manual_valuations_user_created
+  on public.manual_valuations (user_id, created_at desc);
+
+-- Optional cache of per-platform repair economics, keyed by a coarse platform identifier
+-- (e.g. 'bmw_z3_e36-7', 'miata_na') plus a normalized issue code
+-- (e.g. 'door_card', 'convertible_top'). The valuation engine can fall back to
+-- segment-level defaults when a row does not exist, so this table can be populated
+-- incrementally over time.
+create table if not exists public.platform_repair_costs (
+  platform_key text not null,
+  issue_code text not null,
+  parts_cost numeric(10,2) not null,
+  labor_hours numeric(5,2) not null,
+  currency text not null default 'USD',
+  created_at timestamptz not null default now(),
+  primary key (platform_key, issue_code)
+);
+
