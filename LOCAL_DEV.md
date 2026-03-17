@@ -29,6 +29,10 @@ Optional (Ollama):
 - `OLLAMA_EXTRACTION_MODEL` (default: `qwen2.5:latest`)
 - `OLLAMA_REASONING_MODEL` (default: `llama3.1:latest`)
 
+Optional (safety/env):
+
+- `AXLE_ENV=local` — enables dev-only endpoints/scripts that are disabled elsewhere (e.g. the watchlists runner stub + smoke tests). Keep this set to `local` for your dev Supabase.
+
 ## Run
 
 ```bash
