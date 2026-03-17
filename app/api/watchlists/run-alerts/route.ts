@@ -32,7 +32,11 @@ export async function GET(req: Request) {
   const { data, error } = await q.order('created_at', { ascending: false });
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message, hint: 'Did you run db/migrations/2026-03-17_watchlists.sql in Supabase?' },
+      {
+        ok: false,
+        error: error.message,
+        hint: 'Have you applied the watchlists migration in Supabase? See SUPABASE_MIGRATIONS.md and run the latest watchlists SQL.'
+      },
       { status: 500 }
     );
   }
