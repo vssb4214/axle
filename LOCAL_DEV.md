@@ -43,6 +43,12 @@ Open:
 - http://localhost:3000
 - http://localhost:3000/health (sanity checks)
 
+## If things look weird
+
+- Clear Next cache: `rm -rf .next`
+- Reinstall deps: `rm -rf node_modules && pnpm install`
+- Ensure you're pointing at a *dev* Supabase project (never prod)
+
 ## Ollama
 
 Install + run:
