@@ -31,6 +31,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Link href="/messages" className="hover:text-white">
               Messages
             </Link>
+            <Link href="/watchlists" className="hover:text-white">
+              Watchlists
+            </Link>
             <Suspense>
               <UserMenu />
             </Suspense>
