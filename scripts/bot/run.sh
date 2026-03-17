@@ -9,6 +9,7 @@ TASK_FILE="${1:-$SCRIPT_DIR/task.md}"
 DRY_RUN="${DRY_RUN:-false}"
 AUTO_PUSH="${AUTO_PUSH:-true}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-600}"
+PRESERVE_BRANCH_ON_FAILURE="${PRESERVE_BRANCH_ON_FAILURE:-true}"
 
 LOCK_DIR="$ROOT_DIR/.bot.lock"
 
@@ -72,6 +73,9 @@ FALLBACK_USED="false"
 STATUS="running"
 COMMIT_HASH=""
 VALIDATION_STATUS="not_run"
+FAILURE_TYPE=""
+FAILURE_REASON=""
+LLM_FALLBACK_PRINTED="false"
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -88,6 +92,7 @@ write_json() {
   python3 - <<'PY' \
     "$RUN_ID" "$TASK_ID" "$GOAL" "$NOTES" "$BRANCH_NAME" "$ORIGINAL_BRANCH" "$ORIGINAL_COMMIT" \
     "$STATUS" "$VALIDATION_STATUS" "$COMMIT_HASH" "$DRY_RUN" "$AUTO_PUSH" "$FALLBACK_USED" \
+    "$FAILURE_TYPE" "$FAILURE_REASON" \
     "$START_TIME" "$(timestamp_utc)" \
     "$CHANGED_FILES_FILE" "$VALIDATION_RESULTS_FILE" "$COMMANDS_FILE" \
     "${ALLOWED_PATHS[@]}" -- \
@@ -96,6 +101,7 @@ import json, os, sys
 (
   run_id, task_id, goal, notes, branch_name, original_branch, original_commit,
   status, validation_status, commit_hash, dry_run, auto_push, fallback_used,
+  failure_type, failure_reason,
   started_at, ended_at, changed_files_path, validation_results_path, commands_path,
   *rest
 ) = sys.argv[1:]
@@ -128,6 +134,8 @@ out = {
   'dry_run': dry_run.lower() == 'true',
   'auto_push': auto_push.lower() == 'true',
   'fallback_used': fallback_used.lower() == 'true',
+  'failure_type': failure_type or None,
+  'failure_reason': failure_reason or None,
   'allowed_paths': allowed_paths,
   'abort_conditions': abort_conditions,
   'changed_files': read_lines(changed_files_path),
@@ -144,6 +152,8 @@ fail_infra() {
   local reason="$1"
   echo "INFRA FAILURE: $reason" >&2
   STATUS="infra_failed"
+  FAILURE_TYPE="infra"
+  FAILURE_REASON="$reason"
   write_json > "$JSON_FILE"
   exit 2
 }
@@ -153,10 +163,16 @@ fail_task() {
   echo "TASK FAILURE: $reason" >&2
   STATUS="failed"
   VALIDATION_STATUS="failed"
-  git reset --hard "$ORIGINAL_COMMIT" || true
-  git checkout "$ORIGINAL_BRANCH" >/dev/null 2>&1 || true
-  if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
-    git branch -D "$BRANCH_NAME" >/dev/null 2>&1 || true
+  FAILURE_TYPE="task"
+  FAILURE_REASON="$reason"
+  if [[ "$PRESERVE_BRANCH_ON_FAILURE" == "true" ]]; then
+    echo "Preserving branch for inspection: $BRANCH_NAME" >&2
+  else
+    git reset --hard "$ORIGINAL_COMMIT" || true
+    git checkout "$ORIGINAL_BRANCH" >/dev/null 2>&1 || true
+    if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+      git branch -D "$BRANCH_NAME" >/dev/null 2>&1 || true
+    fi
   fi
   write_json > "$JSON_FILE"
   exit 1
