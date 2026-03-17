@@ -141,7 +141,15 @@ export default async function WatchlistsPage() {
                     </button>
                   </form>
                   <form action={async () => deleteWatchlist(w.id)}>
-                    <button className="btn-secondary" type="submit">Delete</button>
+                    <button
+                      className="btn-secondary"
+                      type="submit"
+                      onClick={(e) => {
+                        if (!confirm('Delete this watchlist?')) e.preventDefault();
+                      }}
+                    >
+                      Delete
+                    </button>
                   </form>
                 </div>
               </li>
