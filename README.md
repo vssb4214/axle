@@ -17,6 +17,9 @@ Peer-to-peer car trading and selling with honest, comps-based valuations powered
 Create a `.env.local` file:
 
 ```bash
+# Mark local/dev explicitly (used by safety checks in scripts)
+AXLE_ENV=local
+
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=... # for local seed script only

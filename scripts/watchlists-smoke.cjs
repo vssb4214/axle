@@ -18,9 +18,9 @@ function requireNoProd() {
     /prod/i.test(process.env.NODE_ENV ?? '') ||
     // If it's not a supabase.co project URL at all, it's suspicious (could be something else).
     /\.supabase\.co/.test(url) === false ||
-    // If it *is* a supabase.co URL, we still treat it as potentially prod by default.
+    // If it *is* a supabase.co URL, treat it as potentially prod *unless* explicitly marked local/dev.
     // This script uses the service role key and performs writes.
-    /\.supabase\.co/.test(url) === true;
+    (/\.supabase\.co/.test(url) === true && process.env.AXLE_ENV !== 'local');
 
   if (allowProd) return;
   if (looksLikeProd) {
