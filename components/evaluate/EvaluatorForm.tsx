@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useRef } from 'react';
 
 type Props = {
@@ -15,7 +15,6 @@ type Props = {
   defaultWear?: string;
   defaultMods?: string;
   defaultZip?: string;
-  defaultRadiusMiles?: string;
 };
 
 const inputClass =
@@ -32,11 +31,9 @@ export function EvaluatorForm({
   defaultColor,
   defaultWear,
   defaultMods,
-  defaultZip,
-  defaultRadiusMiles
+  defaultZip
 }: Props) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(e: React.FormEvent) {
@@ -59,7 +56,6 @@ export function EvaluatorForm({
     const mods = fd.get('mods');
     const wear = fd.get('wear');
     const zip = fd.get('zip');
-    const radiusMiles = fd.get('radius_miles');
     if (trim) params.set('trim', String(trim));
     if (condition) params.set('condition', String(condition));
     if (transmission) params.set('transmission', String(transmission));
@@ -67,7 +63,6 @@ export function EvaluatorForm({
     if (mods) params.set('mods', String(mods));
     if (wear) params.set('wear', String(wear));
     if (zip) params.set('zip', String(zip));
-    if (radiusMiles) params.set('radius_miles', String(radiusMiles));
 
     // Prefer client-side navigation when JS is healthy; otherwise the plain GET submit still works.
     if (e?.preventDefault) {
@@ -213,32 +208,18 @@ export function EvaluatorForm({
           placeholder="e.g. needs tires, clear coat fading, convertible top worn, paint chips, brakes soon"
         />
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label htmlFor="zip" className="block text-xs font-medium text-slate-300">ZIP (optional)</label>
-          <input
-            id="zip"
-            name="zip"
-            type="text"
-            inputMode="numeric"
-            defaultValue={defaultZip}
-            className={inputClass}
-            placeholder="e.g. 92101"
-          />
-        </div>
-        <div>
-          <label htmlFor="radius_miles" className="block text-xs font-medium text-slate-300">Radius (miles)</label>
-          <input
-            id="radius_miles"
-            name="radius_miles"
-            type="number"
-            min="5"
-            max="500"
-            defaultValue={defaultRadiusMiles ?? '100'}
-            className={inputClass}
-            placeholder="e.g. 100"
-          />
-        </div>
+      <div>
+        <label htmlFor="zip" className="block text-xs font-medium text-slate-300">ZIP</label>
+        <input
+          id="zip"
+          name="zip"
+          type="text"
+          inputMode="numeric"
+          required
+          defaultValue={defaultZip}
+          className={inputClass}
+          placeholder="e.g. 92101"
+        />
       </div>
       <button type="submit" className="btn-primary">
         Get valuation

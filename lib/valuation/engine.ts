@@ -19,12 +19,17 @@ export type ListingInput = {
   color?: string | null;
   mods?: string | null;
   wear?: string | null;
+  wear_issues?: IssueCode[] | null;
+  wear_costs?: { label: string; parts_cost: number; labor_hours: number; category: string }[] | null;
 };
 
-type IssueCode =
+export type IssueCode =
   | 'tires'
   | 'brakes'
   | 'clutch'
+  | 'head_light'
+  | 'tail_light'
+  | 'windshield'
   | 'heavy_paint'
   | 'minor_paint'
   | 'convertible_top'
@@ -40,6 +45,27 @@ function norm(s: string | null | undefined): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+function extractDisplacementLiters(text: string | null | undefined): number | null {
+  const t = (text ?? '').toLowerCase();
+  if (!t) return null;
+
+  // "2.8", "3.0", "2.5i", etc.
+  const m = t.match(/(^|[^0-9])([1-6]\.[0-9])([^0-9]|$)/);
+  if (m?.[2]) {
+    const v = parseFloat(m[2]);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  // "30i" / "3 0i" / "25i"
+  const m2 = t.match(/(^|[^0-9])([1-6])\s?([0-9])\s?i([^a-z0-9]|$)/);
+  if (m2?.[2] && m2?.[3]) {
+    const v = parseFloat(`${m2[2]}.${m2[3]}`);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  return null;
 }
 
 function modelMatches(listingModel: string, compModel: string, listingTrim?: string | null, compTrim?: string | null): boolean {
@@ -67,12 +93,26 @@ function modelMatches(listingModel: string, compModel: string, listingTrim?: str
 }
 
 export function filterComparableComps(listing: ListingInput, comps: NormalizedComp[]): NormalizedComp[] {
+  const listingText = `${listing.trim ?? ''} ${listing.mods ?? ''} ${listing.wear ?? ''}`.toLowerCase();
+  const wantsMobility = /\bmobility\b|wheelchair|handicap|accessible/.test(listingText);
+  const listingDisp = extractDisplacementLiters(`${listing.model ?? ''} ${listing.trim ?? ''}`);
+
   return comps.filter((c) => {
     if (!c.asking_price || !c.year) return false;
     if (!c.make || norm(c.make) !== norm(listing.make)) return false;
     if (!c.model || !modelMatches(listing.model, c.model, listing.trim, c.trim)) return false;
     if (Math.abs(c.year - listing.year) > 3) return false;
     if (c.mileage && Math.abs(c.mileage - listing.mileage) > 120_000) return false;
+    // Mobility conversions can price far above standard trims; exclude unless listing indicates it.
+    if (!wantsMobility) {
+      const compText = `${c.trim ?? ''} ${c.source_title ?? ''}`.toLowerCase();
+      if (/\bmobility\b|auto access|wheelchair|handicap|accessible/.test(compText)) return false;
+    }
+    // Generic engine-variant guard: when both imply a displacement, require close match.
+    if (listingDisp != null) {
+      const compDisp = extractDisplacementLiters(`${c.model ?? ''} ${c.trim ?? ''} ${c.source_title ?? ''}`);
+      if (compDisp != null && Math.abs(compDisp - listingDisp) >= 0.4) return false;
+    }
     return true;
   });
 }
@@ -87,15 +127,28 @@ function mileageAdjustment(
   segment: CarSegment
 ): number {
   const diff = listingMileage - compMileage;
-  if (diff <= 0) return compPrice;
+  if (diff === 0) return compPrice;
   const dollarsPerMile = getMileageDollarsPerMile(segment);
+  // Prevent mileage math from crushing low-priced cars. When compPrice is low, a high $/mi
+  // (e.g. sports segments) can over-penalize by thousands. Scale $/mi to the listing price.
+  // Example: for a ~$7k comp, cap at about $0.04/mi.
+  const dollarsPerMileCapped = Math.min(dollarsPerMile, compPrice / 180_000);
+  // When the listing has *fewer* miles than the comp, allow an uplift, but cap it hard.
+  // This fixes cases like low-mile minivans being undervalued vs high-mile dealer comps.
+  if (diff < 0) {
+    const milesBetter = Math.abs(diff);
+    const rawBump = milesBetter * dollarsPerMileCapped * 1.0;
+    const cap = (segment === 'sports' || segment === 'luxury_sports') ? compPrice * 0.20 : compPrice * 0.15;
+    return compPrice + Math.min(rawBump, cap);
+  }
+
   // Allow steeper mileage discounts for enthusiast cars where miles matter a lot.
   const baseCap = compPrice * 0.35;
   const cap =
     segment === 'sports' || segment === 'luxury_sports'
       ? compPrice * 0.5
       : baseCap;
-  const deduction = Math.min(diff * dollarsPerMile, cap);
+  const deduction = Math.min(diff * dollarsPerMileCapped, cap);
   // For very high-mile enthusiast cars, allow a larger relative drop.
   const floor =
     segment === 'sports' || segment === 'luxury_sports'
@@ -115,7 +168,10 @@ function ageAdjustment(compYear: number, listingYear: number, compPrice: number,
     const factor = Math.pow(1 - depPerYear, yearDiff);
     return compPrice * factor;
   }
-  const bump = Math.min(-yearDiff * depPerYear * 0.5, 0.12);
+  // Newer comp than listing: allow a bump, but cap it harder for mainstream cars.
+  // This prevents a few high-priced newer comps from pulling the range up too much.
+  const cap = segment === 'sports' || segment === 'luxury_sports' ? 0.12 : 0.07;
+  const bump = Math.min(-yearDiff * depPerYear * 0.5, cap);
   return compPrice * (1 + bump);
 }
 
@@ -131,13 +187,72 @@ function conditionMultiplier(condition: string): number {
   }
 }
 
-/** Trim match: same trim boosts, different trim slight discount. */
+function trimTier(trim: string): number {
+  const t = trim.toLowerCase();
+  // Broad, cross-make heuristic tiers. Not perfect, but better than treating all mismatches equally.
+  if (/\b(platinum|signature|black label|executive|lwb)\b/.test(t)) return 4;
+  if (/\b(limited|touring|premier|ultimate|denali|sport\s?touring)\b/.test(t)) return 3;
+  if (/\b(xle|se|sport|s\s?line|r\s?line|trd|sv|slt|lt|ex|sx)\b/.test(t)) return 2;
+  if (/\b(le|lx|ls|base|l)\b/.test(t)) return 1;
+  return 2;
+}
+
+/** Trim match: same trim boosts; different trims get tier-based normalization. */
 function trimWeight(listingTrim: string | null, compTrim: string | null): number {
   if (!listingTrim || !compTrim) return 1.0;
   const lt = listingTrim.toLowerCase();
   const ct = compTrim.toLowerCase();
   if (ct.includes(lt) || lt.includes(ct)) return 1.10;
-  return 0.96;
+  const listingTier = trimTier(lt);
+  const compTier = trimTier(ct);
+  const diff = compTier - listingTier;
+  // If comp is higher trim than listing, discount it more; if lower trim, uplift it modestly.
+  // Clamp to keep it sane across unknown trim strings.
+  const factor = 1 - diff * 0.07;
+  return Math.max(0.82, Math.min(1.18, factor));
+}
+
+function trimsAreCompatible(listingTrim: string | null, compTrim: string | null): boolean {
+  if (!listingTrim || !compTrim) return true;
+  const lt = listingTrim.toLowerCase().trim();
+  const ct = compTrim.toLowerCase().trim();
+  if (!lt || !ct) return true;
+  if (ct.includes(lt) || lt.includes(ct)) return true;
+  const stop = new Set([
+    'passenger',
+    'seater',
+    'van',
+    'wagon',
+    'sedan',
+    'coupe',
+    'hatch',
+    'awd',
+    'fwd',
+    'rwd',
+    '4dr',
+    '2dr',
+    '4x4',
+    '4wd',
+    '2wd',
+    'base',
+    'with',
+    'pkg',
+    'package'
+  ]);
+  const tokenize = (s: string) =>
+    s
+      .split(/[^a-z0-9]+/g)
+      .map((t) => t.trim())
+      .filter((t) => t && !stop.has(t) && !/^\d+$/.test(t));
+
+  const ltTokens = new Set(tokenize(lt));
+  const ctTokens = new Set(tokenize(ct));
+  if (ltTokens.size === 0 || ctTokens.size === 0) return false;
+
+  for (const t of ltTokens) {
+    if (ctTokens.has(t)) return true;
+  }
+  return false;
 }
 
 /** Optional mods: desirable keywords slight bump; "none" or empty neutral. */
@@ -178,6 +293,16 @@ function transmissionWeight(transmission: string | null, segment: CarSegment): n
   return 1.0;
 }
 
+function compSourceAskingAdjustment(source: string | null | undefined): number {
+  const s = (source ?? '').toLowerCase();
+  if (s.includes('dealer')) return 0.96;
+  // Auto.dev listings are predominantly dealer retail asking.
+  // Apply a stronger discount to approximate private-party value.
+  if (s === 'autodev') return 0.95;
+  if (s.includes('auction')) return 0.99;
+  return 1.0;
+}
+
 // Approximate hard repair costs by segment (very rough, but segment-aware).
 const SEGMENT_REPAIR_COSTS: Record<
   CarSegment,
@@ -185,6 +310,7 @@ const SEGMENT_REPAIR_COSTS: Record<
     tires: number;
     brakes: number;
     clutch: number;
+    windshield: number;
     minor_paint: number;
     heavy_paint: number;
     convertible_top: number;
@@ -195,6 +321,7 @@ const SEGMENT_REPAIR_COSTS: Record<
     tires: 1100,
     brakes: 900,
     clutch: 1800,
+    windshield: 700,
     minor_paint: 800,
     heavy_paint: 2500,
     convertible_top: 2000,
@@ -204,6 +331,7 @@ const SEGMENT_REPAIR_COSTS: Record<
     tires: 1400,
     brakes: 1300,
     clutch: 2600,
+    windshield: 750,
     minor_paint: 1200,
     heavy_paint: 3500,
     convertible_top: 2600,
@@ -213,6 +341,7 @@ const SEGMENT_REPAIR_COSTS: Record<
     tires: 900,
     brakes: 800,
     clutch: 1800,
+    windshield: 550,
     minor_paint: 900,
     heavy_paint: 2800,
     convertible_top: 0,
@@ -222,6 +351,7 @@ const SEGMENT_REPAIR_COSTS: Record<
     tires: 1000,
     brakes: 900,
     clutch: 2200,
+    windshield: 650,
     minor_paint: 1100,
     heavy_paint: 3200,
     convertible_top: 2300,
@@ -231,6 +361,7 @@ const SEGMENT_REPAIR_COSTS: Record<
     tires: 550,
     brakes: 500,
     clutch: 1300,
+    windshield: 350,
     minor_paint: 600,
     heavy_paint: 2000,
     convertible_top: 1700,
@@ -240,6 +371,7 @@ const SEGMENT_REPAIR_COSTS: Record<
     tires: 800,
     brakes: 700,
     clutch: 1900,
+    windshield: 450,
     minor_paint: 800,
     heavy_paint: 2600,
     convertible_top: 2200,
@@ -297,9 +429,18 @@ function extractIssues(wear: string): IssueCode[] {
   const w = wear.toLowerCase();
   const issues = new Set<IssueCode>();
 
-  if (/needs tires|tires? (soon|needed|shot)|bald tires?/.test(w)) issues.add('tires');
+  if (/(needs tires?|bad tires?|worn tires?|bald tires?|tires?\s+(soon|needed|shot|bad|worn))/.test(w)) issues.add('tires');
   if (/brakes? (soon|needed)|rotors?/.test(w)) issues.add('brakes');
   if (/clutch (soon|slipping|needed)/.test(w)) issues.add('clutch');
+  if (/(windshield|windscreen).*(crack|cracked|chip|chipped)|crack(?:ed)?[^\n]{0,60}(windshield|windscreen)/.test(w)) {
+    issues.add('windshield');
+  }
+  if (/(head ?light|headlight).*(crack|cracked|broken)|crack(?:ed)?[^\n]{0,40}(head ?light|headlight)/.test(w)) {
+    issues.add('head_light');
+  }
+  if (/(tail ?light|taillight).*(crack|cracked|broken)|crack(?:ed)?[^\n]{0,40}(tail ?light|taillight)/.test(w)) {
+    issues.add('tail_light');
+  }
 
   if (/clear coat|peeling|oxidized|fading paint|hail|paint is gone|no paint/.test(w)) {
     issues.add('heavy_paint');
@@ -312,7 +453,11 @@ function extractIssues(wear: string): IssueCode[] {
   if (/window actuators?|window regulators?/.test(w)) issues.add('window_regulator');
   if (/interior (is a )?mess|interior shot|torn seats?/.test(w)) issues.add('interior_refresh');
 
-  if (/check engine|misfire|overheat|oil leak|coolant leak|transmission (issue|slip)|diff (noise|whine)/.test(w)) {
+  if (
+    /check engine|misfire|overheat|oil leak|coolant leak|transmission (issue|slip)|diff (noise|whine)/.test(w) ||
+    // Common phrasing: "oil pan leak", "transmission pan leak"
+    /(oil|transmission)\s+pan\s+leak|pan\s+leak/.test(w)
+  ) {
     issues.add('major_mech');
   }
 
@@ -356,57 +501,106 @@ function wearFactorFromHardCosts(
   const segmentCosts = SEGMENT_REPAIR_COSTS[segment] ?? SEGMENT_REPAIR_COSTS.other;
   const laborRate = getLaborRateForRegion(listing.state ?? null);
 
-  const issues = extractIssues(wear);
-  let totalCost = 0;
+  // If LLM provided itemized costs, apply them directly so arbitrary wear text is valued.
+  if (listing.wear_costs && listing.wear_costs.length > 0) {
+    let eligible = 0;
+    let alwaysExcess = 0;
+    for (const it of listing.wear_costs) {
+      const parts = typeof it.parts_cost === 'number' ? it.parts_cost : 0;
+      const hours = typeof it.labor_hours === 'number' ? it.labor_hours : 0;
+      const raw = parts + hours * laborRate;
+      const cost = clampCost(raw, compPrice);
+      if (!cost) continue;
+
+      const cat = (it.category ?? '').toLowerCase();
+      const label = (it.label ?? '').toLowerCase();
+      const isImmediate =
+        cat === 'safety' ||
+        cat === 'mechanical' ||
+        // Missing/broken items are not "expected wear" even on old cars.
+        /\b(missing|broken|cracked|crack|shattered|not working|doesn'?t work|leak|leaking|oil leak|transmission leak|coolant leak|power steering leak)\b/.test(label);
+      if (isImmediate) alwaysExcess += cost;
+      else eligible += cost;
+    }
+
+    const totalCost = eligible + alwaysExcess;
+    if (totalCost <= 0) return 1.0;
+
+    const excessCost = alwaysExcess + Math.max(0, eligible - expectedCost);
+    if (excessCost <= 0) return 1.0;
+
+    const rawFactor = 1 - excessCost / compPrice;
+    return Math.max(0.5, Math.min(1.0, rawFactor));
+  }
+
+  const issues = listing.wear_issues && listing.wear_issues.length > 0 ? listing.wear_issues : extractIssues(wear);
+  let eligibleCost = 0;
+  let alwaysExcessCost = 0;
 
   for (const issue of issues) {
     const override = platformOverrides[issue];
     if (override) {
-      totalCost += override.parts + override.laborHours * laborRate;
+      // Platform overrides are assumed "real" costs, not just background wear.
+      alwaysExcessCost += override.parts + override.laborHours * laborRate;
       continue;
     }
 
     switch (issue) {
       case 'tires':
-        totalCost += segmentCosts.tires + 1.0 * laborRate;
+        // Safety item: treat as an immediate deduction, not "expected wear".
+        alwaysExcessCost += clampCost(segmentCosts.tires + 1.0 * laborRate, compPrice);
         break;
       case 'brakes':
-        totalCost += segmentCosts.brakes + 1.5 * laborRate;
+        // Safety item: treat as an immediate deduction, not "expected wear".
+        alwaysExcessCost += clampCost(segmentCosts.brakes + 1.5 * laborRate, compPrice);
         break;
       case 'clutch':
-        totalCost += segmentCosts.clutch + 6.0 * laborRate;
+        eligibleCost += clampCost(segmentCosts.clutch + 6.0 * laborRate, compPrice);
+        break;
+      case 'tail_light':
+        // Safety/legality item: treat as immediate deduction.
+        alwaysExcessCost += clampCost(250 + 0.5 * laborRate, compPrice);
+        break;
+      case 'head_light':
+        // Safety/legality item: treat as immediate deduction.
+        alwaysExcessCost += clampCost(350 + 0.5 * laborRate, compPrice);
+        break;
+      case 'windshield':
+        // Visibility/safety item: treat as immediate deduction.
+        alwaysExcessCost += clampCost(segmentCosts.windshield + 1.0 * laborRate, compPrice);
         break;
       case 'minor_paint':
-        totalCost += segmentCosts.minor_paint + 4.0 * laborRate;
+        eligibleCost += clampCost(segmentCosts.minor_paint + 4.0 * laborRate, compPrice);
         break;
       case 'heavy_paint':
-        totalCost += segmentCosts.heavy_paint + 12.0 * laborRate;
+        eligibleCost += clampCost(segmentCosts.heavy_paint + 12.0 * laborRate, compPrice);
         break;
       case 'convertible_top':
-        totalCost += segmentCosts.convertible_top + 8.0 * laborRate;
+        eligibleCost += clampCost(segmentCosts.convertible_top + 8.0 * laborRate, compPrice);
         break;
       case 'door_card':
       case 'window_regulator':
       case 'interior_refresh':
-        totalCost += segmentCosts.major_mech * 0.4 + 4.0 * laborRate;
+        eligibleCost += clampCost(segmentCosts.major_mech * 0.4 + 4.0 * laborRate, compPrice);
         break;
       case 'major_mech':
-        totalCost += segmentCosts.major_mech + 6.0 * laborRate;
+        alwaysExcessCost += clampCost(segmentCosts.major_mech + 6.0 * laborRate, compPrice);
         break;
       case 'title_structural':
-        totalCost += compPrice * 0.35;
+        alwaysExcessCost += compPrice * 0.35;
         break;
       case 'rust_severe':
-        totalCost += compPrice * 0.2;
+        alwaysExcessCost += compPrice * 0.2;
         break;
       default:
         break;
     }
   }
 
+  const totalCost = eligibleCost + alwaysExcessCost;
   if (totalCost <= 0) return 1.0;
 
-  const excessCost = Math.max(0, totalCost - expectedCost);
+  const excessCost = alwaysExcessCost + Math.max(0, eligibleCost - expectedCost);
   if (excessCost <= 0) return 1.0;
 
   const rawFactor = 1 - excessCost / compPrice;
@@ -415,21 +609,48 @@ function wearFactorFromHardCosts(
   return Math.max(0.5, Math.min(1.0, rawFactor));
 }
 
+function clampCost(cost: number, compPrice: number): number {
+  if (!Number.isFinite(cost) || cost <= 0) return 0;
+  // Prevent the LLM from inventing absurd costs; still allow large deductions on high-value cars.
+  const hardMax = Math.min(6500, compPrice * 0.22);
+  return Math.max(0, Math.min(hardMax, cost));
+}
+
 export function computeDeterministicValuation(
   listing: ListingInput,
   comps: NormalizedComp[]
 ): ValuationResult | null {
-  const filtered = filterComparableComps(listing, comps);
+  let filtered = filterComparableComps(listing, comps);
   if (!filtered.length) return null;
 
   const segment = getCarSegment(listing.make, listing.model);
+  // When we have a lot of comps (especially after broadening location), keep the most similar.
+  // This reduces outlier-driven ranges while still using real comps.
+  if (filtered.length > 20) {
+    const targetYear = listing.year;
+    const targetMiles = listing.mileage;
+    const targetTrim = listing.trim ?? null;
+    filtered = [...filtered]
+      .sort((a, b) => {
+        const ay = a.year == null ? 999 : Math.abs(a.year - targetYear);
+        const by = b.year == null ? 999 : Math.abs(b.year - targetYear);
+        const am = a.mileage == null ? 999999 : Math.abs(a.mileage - targetMiles);
+        const bm = b.mileage == null ? 999999 : Math.abs(b.mileage - targetMiles);
+        const at = trimWeight(targetTrim, a.trim);
+        const bt = trimWeight(targetTrim, b.trim);
+        // Prefer closer year, closer mileage, and better trim match (higher weight).
+        return ay - by || am - bm || bt - at;
+      })
+      .slice(0, 20);
+  }
+
   const adjustedPrices: number[] = [];
   const keyFactors: string[] = [];
 
   for (const comp of filtered) {
     if (!comp.asking_price || !comp.year) continue;
 
-    let price = comp.asking_price;
+    let price = comp.asking_price * compSourceAskingAdjustment(comp.source);
 
     if (comp.mileage != null && listing.mileage) {
       price = mileageAdjustment(comp.mileage, listing.mileage, price, segment);
@@ -452,10 +673,25 @@ export function computeDeterministicValuation(
 
   if (!adjustedPrices.length) return null;
 
-  const sorted = [...adjustedPrices].sort((a, b) => a - b);
+  // Outlier rejection (robust): drop points far from median using MAD.
+  let usable = [...adjustedPrices];
+  if (usable.length >= 8) {
+    const med = median(usable);
+    const absDevs = usable.map((v) => Math.abs(v - med));
+    const mad = median(absDevs);
+    const sigma = mad * 1.4826;
+    const threshold = sigma > 0 ? 3.0 * sigma : Infinity;
+    const pruned = usable.filter((v) => Math.abs(v - med) <= threshold);
+    if (pruned.length >= Math.max(6, Math.floor(usable.length * 0.6))) {
+      usable = pruned;
+    }
+  }
+
+  const sorted = usable.sort((a, b) => a - b);
   const n = sorted.length;
-  const low = sorted[Math.floor(n * 0.12)] ?? sorted[0];
-  const high = sorted[Math.floor(n * 0.88)] ?? sorted[n - 1];
+  // Tighter percentiles once we have a decent sample.
+  const low = sorted[Math.floor(n * (n >= 10 ? 0.2 : 0.12))] ?? sorted[0];
+  const high = sorted[Math.floor(n * (n >= 10 ? 0.8 : 0.88))] ?? sorted[n - 1];
   const mid = Math.round(sorted.reduce((s, p) => s + p, 0) / n);
 
   const spread = high - low;
@@ -471,7 +707,31 @@ export function computeDeterministicValuation(
   keyFactors.push(`${compCount} comparables (same make/model, ±3 years).`);
   keyFactors.push(`Segment: ${segment}. Mileage adjustment: $${dollarsPerMile.toFixed(2)}/mi (varies by segment).`);
   keyFactors.push('Age, trim, region, condition, transmission, mods, and wear/issues applied as weighted adjustments.');
+  keyFactors.push('Dealer asking prices are slightly discounted and outliers are trimmed for stability.');
   keyFactors.push(`Range is ${(relativeSpread * 100).toFixed(0)}% of mid; lower spread = higher confidence.`);
+
+  // Approximate "what moved the needle" breakdown, using the final mid as a reference price.
+  const base = mid;
+  const adj: { label: string; delta: number }[] = [];
+  const condition = listing.condition ?? 'good';
+  const conditionFactor = conditionMultiplier(condition);
+  if (conditionFactor !== 1) adj.push({ label: `Condition (${condition})`, delta: Math.round(base * (conditionFactor - 1)) });
+
+  const transFactor = transmissionWeight(listing.transmission ?? null, segment);
+  if (transFactor !== 1) adj.push({ label: `Transmission (${listing.transmission ?? 'n/a'})`, delta: Math.round(base * (transFactor - 1)) });
+
+  const modsFactor = modsWeight(listing.mods ?? null);
+  if (modsFactor !== 1) adj.push({ label: 'Mods / upgrades', delta: Math.round(base * (modsFactor - 1)) });
+
+  const wearFactor = wearFactorFromHardCosts(listing, segment, base);
+  if (wearFactor !== 1) adj.push({ label: 'Wear / repairs', delta: Math.round(base * (wearFactor - 1)) });
+
+  // Itemized upkeep/upgrades from user-provided text (conservative, value-preservation).
+  // This is separate from "market signals" (learned from comps text).
+  const upkeepItems = estimateUpkeepAdjustments(listing, base);
+  for (const it of upkeepItems) adj.push(it);
+
+  const marketSignals = estimateMarketSignals(listing, filtered, segment);
 
   return {
     value_low: low,
@@ -479,8 +739,114 @@ export function computeDeterministicValuation(
     value_high: high,
     confidence,
     comp_count: compCount,
-    key_factors: keyFactors
+    key_factors: keyFactors,
+    adjustments: adj,
+    market_signals: marketSignals.length > 0 ? marketSignals : undefined
   };
+}
+
+function estimateUpkeepAdjustments(listing: ListingInput, baseMid: number): { label: string; delta: number }[] {
+  const text = `${listing.mods ?? ''}\n${listing.wear ?? ''}`.toLowerCase();
+  if (!text.trim()) return [];
+
+  // Conservative percentage-based credits; cap total so we don't "pay full cost" of mods.
+  const items: { label: string; re: RegExp; pct: number }[] = [
+    { label: 'Cooling system refresh', re: /cooling system|radiator|expansion tank|thermostat|water pump|hoses?/i, pct: 0.015 },
+    { label: 'Full brake service', re: /full brake service|brake service|zimmermann|akebono|rotors?|pads?|brake fluid/i, pct: 0.01 },
+    { label: 'Suspension refresh (Bilstein / shocks / struts)', re: /bilstein|b6 struts?|struts?|shocks?/i, pct: 0.01 },
+    { label: 'Engine & transmission mounts', re: /engine (and )?transmission mounts?|engine mounts?|transmission mounts?/i, pct: 0.008 },
+    { label: 'Differential service', re: /diff(erential)? service/i, pct: 0.004 },
+    { label: 'Steering refresh (tie-rod ends)', re: /tie[\s-]?rod/i, pct: 0.005 },
+    { label: 'PCV/CCV service', re: /pcv|ccv/i, pct: 0.006 },
+    { label: 'DISA service', re: /disa/i, pct: 0.004 },
+    { label: 'Bluetooth integration (BlueBus)', re: /bluebus/i, pct: 0.004 },
+    { label: 'Strut brace', re: /strut brace|ultraracing/i, pct: 0.003 },
+    { label: 'Tint', re: /tinted|tint/i, pct: 0.002 },
+    { label: 'LED lighting', re: /\bleds?\b/i, pct: 0.001 }
+  ];
+
+  const matched = items.filter((i) => i.re.test(text));
+  if (matched.length === 0) return [];
+
+  const deltas: { label: string; delta: number }[] = [];
+  let total = 0;
+  const cap = Math.min(baseMid * 0.06, 1200);
+
+  for (const m of matched) {
+    const raw = Math.round(baseMid * m.pct);
+    if (raw <= 0) continue;
+    const remaining = Math.max(0, cap - total);
+    if (remaining <= 0) break;
+    const applied = Math.min(raw, remaining);
+    total += applied;
+    deltas.push({ label: m.label, delta: applied });
+  }
+
+  return deltas;
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  if (s.length % 2 === 1) return s[mid]!;
+  return (s[mid - 1]! + s[mid]!) / 2;
+}
+
+function estimateMarketSignals(
+  listing: ListingInput,
+  comps: NormalizedComp[],
+  segment: CarSegment
+): { label: string; delta: number; n_with: number; n_without: number }[] {
+  // Learn approximate keyword uplifts from the comps we already fetched online.
+  // This is intentionally conservative: only show signals when we have enough samples.
+  const text = `${listing.mods ?? ''}\n${listing.wear ?? ''}`.toLowerCase();
+  if (!text.trim()) return [];
+
+  const KEYWORDS: { label: string; re: RegExp }[] = [
+    { label: 'Cooling system refresh', re: /cooling system|radiator|expansion tank|thermostat|water pump/i },
+    { label: 'Full brake service', re: /brake service|rotors?|pads?|brake fluid/i },
+    { label: 'Struts / suspension refresh', re: /bilstein|b6 struts?|struts?|shocks?|coilovers?/i },
+    { label: 'Engine / transmission mounts', re: /engine mounts?|transmission mounts?/i },
+    { label: 'Differential service', re: /diff(erential)? service/i },
+    { label: 'Tie-rod ends / steering refresh', re: /tie-rod|tie rod/i },
+    { label: 'Bluetooth upgrade (e.g. BlueBus)', re: /bluebus|bluetooth/i }
+  ];
+
+  const requested = KEYWORDS.filter((k) => k.re.test(text));
+  if (requested.length === 0) return [];
+
+  // Normalize comp prices for year/mileage (so we compare like-to-like).
+  // We don't apply listing wear/mods multipliers here; we're trying to infer uplift from comp text.
+  const normalized = comps
+    .map((c) => {
+      if (!c.asking_price || !c.year) return null;
+      let price = c.asking_price;
+      if (c.mileage != null && listing.mileage) {
+        price = mileageAdjustment(c.mileage, listing.mileage, price, segment);
+      }
+      price = ageAdjustment(c.year, listing.year, price, segment);
+      price *= trimWeight(listing.trim ?? null, c.trim);
+      const blob = `${c.source_title ?? ''}\n${c.mods ?? ''}`.toLowerCase();
+      return { price: Math.round(price), blob };
+    })
+    .filter(Boolean) as { price: number; blob: string }[];
+
+  const out: { label: string; delta: number; n_with: number; n_without: number }[] = [];
+
+  for (const k of requested) {
+    const withK = normalized.filter((n) => k.re.test(n.blob)).map((n) => n.price);
+    const withoutK = normalized.filter((n) => !k.re.test(n.blob)).map((n) => n.price);
+    if (withK.length < 3 || withoutK.length < 5) continue;
+    const delta = Math.round(median(withK) - median(withoutK));
+    // Ignore tiny or noisy effects.
+    if (Math.abs(delta) < 150) continue;
+    out.push({ label: k.label, delta, n_with: withK.length, n_without: withoutK.length });
+  }
+
+  // Sort by magnitude so the user sees the biggest signals first.
+  out.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  return out.slice(0, 6);
 }
 
 function baseNewValue(segment: CarSegment): number {
@@ -537,12 +903,31 @@ export function computeFallbackValuation(listing: ListingInput): ValuationResult
   keyFactors.push(`Segment: ${segment}. Mileage adjustment: $${dollarsPerMile.toFixed(2)}/mi (varies by segment).`);
   keyFactors.push('Wear/repairs are priced using platform + region heuristics when detected, otherwise segment defaults.');
 
+  // Provide the same breakdown UI even without comps.
+  const base = valueMid;
+  const adj: { label: string; delta: number }[] = [];
+  const conditionFactor = conditionMultiplier(condition);
+  if (conditionFactor !== 1) adj.push({ label: `Condition (${condition})`, delta: Math.round(base * (conditionFactor - 1)) });
+
+  const transFactor = transmissionWeight(listing.transmission ?? null, segment);
+  if (transFactor !== 1) adj.push({ label: `Transmission (${listing.transmission ?? 'n/a'})`, delta: Math.round(base * (transFactor - 1)) });
+
+  const modsFactor = modsWeight(listing.mods ?? null);
+  if (modsFactor !== 1) adj.push({ label: 'Mods / upgrades', delta: Math.round(base * (modsFactor - 1)) });
+
+  const wearFactor = wearFactorFromHardCosts(listing, segment, base);
+  if (wearFactor !== 1) adj.push({ label: 'Wear / repairs', delta: Math.round(base * (wearFactor - 1)) });
+
+  const upkeepItems = estimateUpkeepAdjustments(listing, base);
+  for (const it of upkeepItems) adj.push(it);
+
   return {
     value_low: low,
     value_mid: valueMid,
     value_high: high,
     confidence: 0.25,
     comp_count: 0,
-    key_factors: keyFactors
+    key_factors: keyFactors,
+    adjustments: adj.length > 0 ? adj : undefined
   };
 }

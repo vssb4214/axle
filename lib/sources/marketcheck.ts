@@ -1,5 +1,7 @@
 import axios from 'axios';
 import type { NormalizedComp } from '@/lib/valuation/types';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 type ListingQuery = {
   year: number;
@@ -9,11 +11,54 @@ type ListingQuery = {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
-  radius_miles?: number | null;
 };
 
 const MARKETCHECK_BASE_URL = process.env.MARKETCHECK_BASE_URL || 'https://api.marketcheck.com/v2';
 const MARKETCHECK_API_KEY = process.env.MARKETCHECK_API_KEY || '';
+
+const cache = new Map<string, { at: number; value: NormalizedComp[] }>();
+const CACHE_TTL_MS = 10 * 60 * 1000;
+
+// When MarketCheck rate-limits (429), avoid spamming the API.
+let rateLimitedUntil = 0;
+
+type DiskCacheEntry = { at: number; comps: NormalizedComp[] };
+type DiskCache = Record<string, DiskCacheEntry>;
+const DISK_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function cacheFilePath(): string {
+  // Keep it in-project but out of git by default.
+  return path.join(process.cwd(), '.cache', 'marketcheck.json');
+}
+
+async function readDiskCache(): Promise<DiskCache> {
+  try {
+    const raw = await fs.readFile(cacheFilePath(), 'utf8');
+    return JSON.parse(raw) as DiskCache;
+  } catch {
+    return {};
+  }
+}
+
+async function writeDiskCache(key: string, entry: DiskCacheEntry): Promise<void> {
+  try {
+    const file = cacheFilePath();
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    const existing = await readDiskCache();
+    existing[key] = entry;
+    await fs.writeFile(file, JSON.stringify(existing), 'utf8');
+  } catch {
+    // Best-effort cache only.
+  }
+}
+
+async function readDiskCacheEntry(key: string): Promise<NormalizedComp[] | null> {
+  const all = await readDiskCache();
+  const hit = all[key];
+  if (!hit) return null;
+  if (Date.now() - hit.at > DISK_CACHE_TTL_MS) return null;
+  return Array.isArray(hit.comps) ? hit.comps : null;
+}
 
 type MarketCheckListing = {
   id?: string | null;
@@ -89,6 +134,16 @@ async function fetchMarketCheckEndpoint(
 ): Promise<NormalizedComp[]> {
   if (!MARKETCHECK_API_KEY) return [];
 
+  const key = `${endpointPath}|${listing.year}|${listing.make}|${listing.model}|${listing.trim ?? ''}|${listing.state ?? ''}|${listing.zip ?? ''}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
+  if (Date.now() < rateLimitedUntil) {
+    // Serve last-known comps if we have them.
+    const disk = await readDiskCacheEntry(key);
+    if (disk) return disk;
+    return [];
+  }
+
   const base = MARKETCHECK_BASE_URL.replace(/\/$/, '');
   const url = `${base}${endpointPath}`;
 
@@ -98,12 +153,14 @@ async function fetchMarketCheckEndpoint(
     year: listing.year,
     make: listing.make,
     model: listing.model,
-    rows: 50
+    // Lower rows reduces payload and rate pressure.
+    rows: 25
   };
   if (listing.state) params.state = listing.state;
-  if (listing.zip) params.zip = listing.zip;
-  if (typeof listing.radius_miles === 'number' && Number.isFinite(listing.radius_miles)) {
-    params.radius = listing.radius_miles;
+  if (listing.zip) {
+    params.zip = listing.zip;
+    // MarketCheck behaves much better with zip+radius; default to 100mi (plan max).
+    params.radius = 100;
   }
 
   const res = await axios.get(url, {
@@ -113,6 +170,13 @@ async function fetchMarketCheckEndpoint(
   });
 
   if (res.status !== 200) {
+    // Cache rate-limit responses briefly to avoid hammering during dev refresh.
+    if (res.status === 429) {
+      cache.set(key, { at: Date.now(), value: [] });
+      rateLimitedUntil = Date.now() + 60_000;
+      const disk = await readDiskCacheEntry(key);
+      if (disk) return disk;
+    }
     throw new Error(`${sourceName} returned ${res.status}`);
   }
 
@@ -125,7 +189,10 @@ async function fetchMarketCheckEndpoint(
         ? raw
         : [];
 
-  return arr.map((l) => toComp(l, sourceName)).filter(Boolean) as NormalizedComp[];
+  const comps = arr.map((l) => toComp(l, sourceName)).filter(Boolean) as NormalizedComp[];
+  cache.set(key, { at: Date.now(), value: comps });
+  void writeDiskCache(key, { at: Date.now(), comps });
+  return comps;
 }
 
 export async function fetchMarketCheckDealerComps(listing: ListingQuery): Promise<NormalizedComp[]> {

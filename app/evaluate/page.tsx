@@ -1,8 +1,12 @@
 import Link from 'next/link';
 import { collectComparableListings } from '@/lib/comps/fetchComps';
-import { computeDeterministicValuation, computeFallbackValuation } from '@/lib/valuation/engine';
+import { computeDeterministicValuation, computeFallbackValuation, filterComparableComps, type IssueCode } from '@/lib/valuation/engine';
+import { getCarSegment } from '@/lib/valuation/segments';
 import { ollamaExplainText } from '@/lib/ollama/client';
 import { ollamaRefineValuation } from '@/lib/ollama/refineValuation';
+import { extractIssuesFromText } from '@/lib/ollama/extractIssues';
+import { extractWearCostsFromText } from '@/lib/ollama/extractWearCosts';
+import { ollamaFilterCompatibleComps } from '@/lib/ollama/filterComps';
 import { logManualValuation } from '@/lib/valuation/logManualValuation';
 import { getCurrentUser } from '@/lib/auth/server';
 import { EvaluatorForm } from '@/components/evaluate/EvaluatorForm';
@@ -36,7 +40,6 @@ type SearchParams = {
   mods?: string;
   wear?: string;
   zip?: string;
-  radius_miles?: string;
 };
 
 export default async function EvaluatePage({
@@ -53,6 +56,7 @@ export default async function EvaluatePage({
 
   let valuation: Awaited<ReturnType<typeof computeDeterministicValuation>> = null;
   let comps: Awaited<ReturnType<typeof collectComparableListings>>['comps'] = [];
+  let compsUsedForValuation: Awaited<ReturnType<typeof collectComparableListings>>['comps'] = [];
   let errors: Awaited<ReturnType<typeof collectComparableListings>>['errors'] = [];
   let explanation: { summary: string; bullets: string[]; warnings: string[] } | null = null;
 
@@ -62,10 +66,11 @@ export default async function EvaluatePage({
       make,
       model,
       trim: searchParams?.trim?.trim() || null,
+      mileage,
       city: null,
       state: null,
       zip: searchParams?.zip?.trim() || null,
-      radius_miles: searchParams?.radius_miles ? parseInt(searchParams.radius_miles, 10) : null
+      radius_miles: null
     };
     try {
       const compResult = await collectComparableListings(query);
@@ -88,14 +93,82 @@ export default async function EvaluatePage({
       transmission: searchParams?.transmission?.trim() || null,
       color: searchParams?.color?.trim() || null,
       mods: searchParams?.mods?.trim() || null,
-      wear: searchParams?.wear?.trim() || null
+      wear: searchParams?.wear?.trim() || null,
+      wear_issues: null as null | IssueCode[],
+      wear_costs: null as null | { label: string; parts_cost: number; labor_hours: number; category: string }[]
     };
 
+    // Optional: use Ollama extraction model to map arbitrary wear text into standardized issues.
+    // This keeps behavior robust even when regex rules don't cover a phrase like "cracked head light".
+    if (listingInput.wear) {
+      try {
+        const parsed = await withTimeout(extractIssuesFromText(listingInput.wear), 1500);
+        const codes = (parsed?.issues?.map((i) => i.code).filter(Boolean) ?? []) as IssueCode[];
+        listingInput.wear_issues = codes.length > 0 ? codes : null;
+      } catch {
+        listingInput.wear_issues = null;
+      }
+    }
+
+    // Optional: have the LLM estimate parts + labor hours per issue for this car.
+    // Engine will clamp costs to avoid hallucinated extremes.
+    if (listingInput.wear) {
+      try {
+        const segment = getCarSegment(make, model);
+        const parsed = await withTimeout(
+          extractWearCostsFromText({
+            rawText: listingInput.wear,
+            year,
+            make,
+            model,
+            trim: listingInput.trim,
+            segment
+          }),
+          2000
+        );
+        const items =
+          parsed?.items
+            ?.filter((i) => i && i.label)
+            .map((i) => ({
+              label: i.label,
+              parts_cost: i.parts_cost,
+              labor_hours: i.labor_hours,
+              category: i.category
+            })) ?? [];
+        listingInput.wear_costs = items.length > 0 ? items : null;
+      } catch {
+        listingInput.wear_costs = null;
+      }
+    }
+
     const baseValuation = computeDeterministicValuation(listingInput, comps) ?? computeFallbackValuation(listingInput);
+    compsUsedForValuation = comps.length > 0 ? filterComparableComps(listingInput, comps) : [];
+
+    // Optional: let the LLM decide which comps are the same variant (engine/displacement/package),
+    // to avoid hardcoding model-specific rules.
+    if (compsUsedForValuation.length >= 6) {
+      try {
+        const title = `${year} ${make} ${model}${listingInput.trim ? ` ${listingInput.trim}` : ''}`.trim();
+        const keep = await withTimeout(
+          ollamaFilterCompatibleComps({
+            listingTitle: title,
+            listingTrim: listingInput.trim ?? null,
+            comps: compsUsedForValuation
+          }),
+          1800
+        );
+        const minKeep = Math.max(3, Math.floor(compsUsedForValuation.length * 0.35));
+        if (keep && keep.length >= minKeep) {
+          compsUsedForValuation = keep.map((i) => compsUsedForValuation[i]!).filter(Boolean);
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     if (baseValuation) {
       const compsSummary =
-        comps
+        compsUsedForValuation
           .slice(0, 10)
           .map(
             (c) =>
@@ -104,9 +177,9 @@ export default async function EvaluatePage({
           .join('\n') || 'No comp details.';
 
       // Only attempt LLM refinement/explanation when we have real comps.
-      if (comps.length > 0) {
+      if (compsUsedForValuation.length > 0) {
         const refinePromise = withTimeout(
-          ollamaRefineValuation(listingInput, comps, baseValuation),
+          ollamaRefineValuation(listingInput, compsUsedForValuation, baseValuation),
           4000
         );
 
@@ -173,7 +246,6 @@ export default async function EvaluatePage({
         defaultTransmission={searchParams?.transmission}
         defaultColor={searchParams?.color}
         defaultZip={searchParams?.zip}
-        defaultRadiusMiles={searchParams?.radius_miles}
         defaultMods={searchParams?.mods}
         defaultWear={searchParams?.wear}
       />
@@ -185,7 +257,7 @@ export default async function EvaluatePage({
           model={model}
           trim={searchParams?.trim}
           valuation={valuation}
-          comps={comps}
+          comps={compsUsedForValuation}
           errors={errors}
           explanation={explanation}
         />

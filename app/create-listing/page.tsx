@@ -34,6 +34,21 @@ export default async function CreateListingPage({
 
       <form action={createListing} className="card space-y-4 p-6">
         <div>
+          <label htmlFor="photo_file" className="block text-xs font-medium text-slate-300">
+            Photo upload
+          </label>
+          <input
+            id="photo_file"
+            name="photo_file"
+            type="file"
+            accept="image/*"
+            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-slate-800 file:px-3 file:py-1.5 file:text-xs file:text-slate-200 hover:file:bg-slate-700"
+          />
+          <p className="mt-1 text-[11px] text-slate-500">
+            Optional. Max 7MB. If you upload a photo, it overrides Photo URL.
+          </p>
+        </div>
+        <div>
           <label htmlFor="photo_url" className="block text-xs font-medium text-slate-300">
             Photo URL
           </label>

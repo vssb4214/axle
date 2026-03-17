@@ -30,7 +30,13 @@ OLLAMA_REASONING_MODEL=llama3.1:latest
 
 1. Create a new Supabase project.
 2. In the SQL editor, run `db/schema.sql` to create the core tables.
-3. Make sure Row Level Security policies are configured per your needs (not included here).
+3. Row Level Security policies are included in `db/schema.sql`. If you modify access patterns (e.g. making drafts private), update policies accordingly.
+
+### Storage setup (listing photos)
+
+Create a public bucket named `listing-photos` in Supabase Storage.
+
+The app uploads listing photos server-side (via service role) and stores the resulting public URL in `listing_photos`.
 
 ### Seed sample data
 
@@ -74,8 +80,13 @@ Key routes:
 
 - `/` – landing page with product explanation
 - `/browse` – browse listings
-- `/listings/[id]` – listing detail with valuation and comps UI (once sources are wired)
-- `/dashboard`, `/offers`, `/messages`, `/profile` – stubs to be built out
+- `/evaluate` – on-the-fly valuation (no listing required)
+- `/listings/[id]` – listing detail with valuation + comps, suggested trades, and offer CTA
+- `/create-listing` – create a listing
+- `/dashboard` – your listings + offer counts
+- `/offers` – incoming/outgoing offers, accept/decline, leave rating
+- `/messages` – offer threads and chat
+- `/profile/[userId]` and `/profile/edit` – public profile + edit
 
 ### Extending the valuation/comps pipeline
 
@@ -99,5 +110,5 @@ Key routes:
 |------|----------|--------|
 | **Supabase** | Yes | Project URL + anon key + service role key in `.env.local`. No extra API keys. |
 | **Ollama** | No | Optional. If running locally, set `OLLAMA_BASE_URL` (default `http://localhost:11434`). Listing page works without it; valuation explanations are skipped if Ollama is down or missing. |
-| **Comps sources** | No | `lib/sources/*` (Craigslist, forums, BAT, Cars & Bids, Facebook) are stubbed. Add your own scraping or API integrations when you have keys or permission. No API keys needed for the app to run. |
+| **Comps sources** | No | Built-in adapters exist under `lib/sources/*` (Auto.dev + MarketCheck supported). Add more sources as needed. The app always returns a fallback estimate even when comps are unavailable. |
 

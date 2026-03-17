@@ -6,10 +6,43 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { supabaseAdmin } from '@/lib/db/admin';
 
+const LISTING_PHOTO_BUCKET = 'listing-photos';
+
 function num(s: string | null): number {
   if (s == null || s === '') return 0;
   const n = parseInt(s, 10);
   return Number.isNaN(n) ? 0 : n;
+}
+
+async function uploadListingPhoto(args: {
+  file: File;
+  userId: string;
+  listingId: string;
+}): Promise<{ url: string } | { error: string }> {
+  const file = args.file;
+  if (!file || typeof file.arrayBuffer !== 'function') return { error: 'Invalid file.' };
+  if (!file.type?.startsWith('image/')) return { error: 'Photo must be an image.' };
+  if (file.size > 7_000_000) return { error: 'Photo too large (max 7MB).' };
+
+  const ext =
+    (file.name?.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '') ||
+    (file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg');
+  const objectPath = `${args.userId}/${args.listingId}/${crypto.randomUUID()}.${ext}`;
+
+  const buf = Buffer.from(await file.arrayBuffer());
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from(LISTING_PHOTO_BUCKET)
+    .upload(objectPath, buf, {
+      contentType: file.type,
+      upsert: true
+    });
+
+  if (uploadError) return { error: uploadError.message };
+
+  const { data } = supabaseAdmin.storage.from(LISTING_PHOTO_BUCKET).getPublicUrl(objectPath);
+  const publicUrl = data?.publicUrl;
+  if (!publicUrl) return { error: 'Could not get uploaded photo URL.' };
+  return { url: publicUrl };
 }
 
 export async function createListing(formData: FormData) {
@@ -56,13 +89,25 @@ export async function createListing(formData: FormData) {
     redirect('/create-listing?error=' + encodeURIComponent(error.message));
   }
 
-  const photoUrl = (formData.get('photo_url') as string)?.trim();
-  if (listing?.id && photoUrl) {
-    await supabaseAdmin.from('listing_photos').insert({
-      listing_id: listing.id,
-      photo_url: photoUrl,
-      sort_order: 0
-    });
+  // Photo can be provided as either a URL or an uploaded file (preferred).
+  if (listing?.id) {
+    let finalPhotoUrl: string | null = (formData.get('photo_url') as string)?.trim() || null;
+    const photoFile = formData.get('photo_file');
+    if (photoFile instanceof File && photoFile.size > 0) {
+      const up = await uploadListingPhoto({ file: photoFile, userId: user.id, listingId: listing.id });
+      if ('error' in up) {
+        redirect('/create-listing?error=' + encodeURIComponent(up.error));
+      }
+      finalPhotoUrl = up.url;
+    }
+
+    if (finalPhotoUrl) {
+      await supabaseAdmin.from('listing_photos').insert({
+        listing_id: listing.id,
+        photo_url: finalPhotoUrl,
+        sort_order: 0
+      });
+    }
   }
 
   revalidatePath('/dashboard');
@@ -121,8 +166,18 @@ export async function updateListing(listingId: string, formData: FormData) {
     redirect('/listings/' + listingId + '/edit?error=' + encodeURIComponent(error.message));
   }
 
-  const photoUrl = (formData.get('photo_url') as string)?.trim();
-  if (photoUrl) {
+  if (listingId) {
+    let finalPhotoUrl: string | null = (formData.get('photo_url') as string)?.trim() || null;
+    const photoFile = formData.get('photo_file');
+    if (photoFile instanceof File && photoFile.size > 0) {
+      const up = await uploadListingPhoto({ file: photoFile, userId: user.id, listingId });
+      if ('error' in up) {
+        redirect('/listings/' + listingId + '/edit?error=' + encodeURIComponent(up.error));
+      }
+      finalPhotoUrl = up.url;
+    }
+
+    if (finalPhotoUrl) {
     const { data: existing } = await supabaseAdmin
       .from('listing_photos')
       .select('id')
@@ -131,10 +186,11 @@ export async function updateListing(listingId: string, formData: FormData) {
       .limit(1)
       .maybeSingle();
     if (existing) {
-      await supabaseAdmin.from('listing_photos').update({ photo_url: photoUrl }).eq('id', existing.id);
+      await supabaseAdmin.from('listing_photos').update({ photo_url: finalPhotoUrl }).eq('id', existing.id);
     } else {
-      await supabaseAdmin.from('listing_photos').insert({ listing_id: listingId, photo_url: photoUrl, sort_order: 0 });
+      await supabaseAdmin.from('listing_photos').insert({ listing_id: listingId, photo_url: finalPhotoUrl, sort_order: 0 });
     }
+  }
   }
 
   revalidatePath('/dashboard');

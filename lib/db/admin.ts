@@ -1,8 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-let _adminClient: ReturnType<typeof createClient> | null = null;
+// We intentionally keep this loosely typed (no generated Database types required).
+let _adminClient: SupabaseClient | null = null;
 
-function getSupabaseAdmin() {
+function getSupabaseAdmin(): SupabaseClient {
   if (_adminClient) return _adminClient;
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -20,7 +21,7 @@ function getSupabaseAdmin() {
 }
 
 /** Server-only Supabase client with service role. Use for trusted server actions/API routes. */
-export const supabaseAdmin = new Proxy({} as ReturnType<typeof createClient>, {
+export const supabaseAdmin = new Proxy({} as SupabaseClient, {
   get(_, prop) {
     return (getSupabaseAdmin() as unknown as Record<string, unknown>)[prop as string];
   }

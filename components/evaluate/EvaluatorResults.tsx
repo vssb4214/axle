@@ -86,10 +86,59 @@ export function EvaluatorResults({ year, make, model, trim, valuation, comps, er
             ))}
           </ul>
 
+          {valuation.adjustments && valuation.adjustments.length > 0 && (
+            <div className="mt-5 rounded-lg bg-slate-900/60 p-4">
+              <div className="text-sm font-semibold text-white">How your inputs affected value</div>
+              <p className="mt-1 text-xs text-slate-400">
+                Approximate impact on the mid estimate from your condition, transmission, mods, and wear inputs.
+              </p>
+              <ul className="mt-3 space-y-1.5 text-sm text-slate-300">
+                {valuation.adjustments.map((a, i) => (
+                  <li key={i} className="flex items-center justify-between gap-4">
+                    <span>{a.label}</span>
+                    <span className={a.delta >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                      {a.delta >= 0 ? '+' : '−'}${Math.abs(a.delta).toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {valuation.market_signals && valuation.market_signals.length > 0 && (
+            <div className="mt-4 rounded-lg bg-slate-900/60 p-4">
+              <div className="text-sm font-semibold text-white">Market signals from similar listings</div>
+              <p className="mt-1 text-xs text-slate-400">
+                Estimated uplift from fetched comps that mention these items vs those that don&apos;t (after normalizing for year/mileage). This is directional and can be noisy.
+              </p>
+              <ul className="mt-3 space-y-1.5 text-sm text-slate-300">
+                {valuation.market_signals.map((s, i) => (
+                  <li key={i} className="flex items-center justify-between gap-4">
+                    <span>
+                      {s.label}{' '}
+                      <span className="text-xs text-slate-400">
+                        (with {s.n_with} / without {s.n_without})
+                      </span>
+                    </span>
+                    <span className={s.delta >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                      {s.delta >= 0 ? '+' : '−'}${Math.abs(s.delta).toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {isFallbackEstimate && (
             <div className="mt-4 rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">
               We didn&apos;t find verified comparables for this exact car yet. This range is computed from depreciation, mileage, condition, and detected wear/repairs. Expect wider error bars.
             </div>
+          )}
+
+          {errors.length > 0 && (
+            <p className="mt-3 text-xs text-slate-500">
+              Some sources unavailable: {errors.map((e) => `${e.source} (${e.message})`).join(', ')}.
+            </p>
           )}
 
           {uniqueSources.length > 0 && (

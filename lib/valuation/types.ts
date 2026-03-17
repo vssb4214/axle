@@ -22,6 +22,10 @@ export type ValuationResult = {
   confidence: number;
   comp_count: number;
   key_factors: string[];
+  /** Optional breakdown of how inputs moved the mid value (approximate). */
+  adjustments?: { label: string; delta: number }[];
+  /** Optional market-learned keyword uplift estimates from fetched comps. */
+  market_signals?: { label: string; delta: number; n_with: number; n_without: number }[];
   /** True when the range was refined by the LLM within comp-based bounds. */
   llm_refined?: boolean;
 };
