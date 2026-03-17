@@ -11,21 +11,42 @@ async function main() {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .insert({
-      email: 'demo@example.com',
-      display_name: 'Demo Enthusiast',
-      city: 'Austin',
-      state: 'TX',
-      bio: 'Collector of driver-focused cars.'
-    })
-    .select('*')
-    .single();
+  const demoEmail = 'demo@example.com';
 
-  if (userError || !user) {
-    console.error(userError);
-    throw new Error('Failed to create demo user');
+  // Make seeding idempotent: reuse the demo user if it already exists.
+  let user = null;
+  const { data: existingUser, error: existingUserError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('email', demoEmail)
+    .maybeSingle();
+
+  if (existingUserError) {
+    console.error(existingUserError);
+    throw new Error('Failed to lookup demo user');
+  }
+
+  if (existingUser) {
+    user = existingUser;
+  } else {
+    const { data: createdUser, error: createUserError } = await supabase
+      .from('users')
+      .insert({
+        email: demoEmail,
+        display_name: 'Demo Enthusiast',
+        city: 'Austin',
+        state: 'TX',
+        bio: 'Collector of driver-focused cars.'
+      })
+      .select('*')
+      .single();
+
+    if (createUserError || !createdUser) {
+      console.error(createUserError);
+      throw new Error('Failed to create demo user');
+    }
+
+    user = createdUser;
   }
 
   const baseListings = [
@@ -62,6 +83,23 @@ async function main() {
     trade_preferences_text: 'Open to interesting trades in similar value range.',
     status: 'active'
   }));
+
+  // Avoid endlessly duplicating listings on repeated seed runs.
+  const { count: existingListingCount, error: existingCountError } = await supabase
+    .from('listings')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id);
+
+  if (existingCountError) {
+    console.error(existingCountError);
+    throw new Error('Failed to check existing listings');
+  }
+
+  if ((existingListingCount ?? 0) > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`Seed skipped: demo user already has ${existingListingCount} listings.`);
+    return;
+  }
 
   const { data: listings, error: listingsError } = await supabase
     .from('listings')
