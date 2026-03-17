@@ -79,6 +79,13 @@ pnpm dev
 
 Then open `http://localhost:3000`.
 
+### Watchlists
+
+Smoke tests:
+
+- Read-only (safe; uses anon key): `node scripts/watchlists-readonly-smoke.cjs`
+- CRUD (writes; uses service role key; refuses prod by default): `node scripts/watchlists-smoke.cjs`
+
 Key routes:
 
 - `/` – landing page with product explanation
