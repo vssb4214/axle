@@ -78,7 +78,7 @@ export default async function WatchlistsPage() {
 
         <button type="submit" className="btn-primary">Create watchlist</button>
         <p className="text-xs text-slate-500">
-          Note: database table must exist. If you haven&apos;t run the migration yet, this page will error.
+          Tip: Watchlists require the `watchlists` table. If it isn&apos;t created yet, the page will still load, but actions may be disabled.
         </p>
       </form>
 

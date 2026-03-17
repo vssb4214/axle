@@ -5,7 +5,7 @@ import { getCurrentUser, getSupabaseServer } from '@/lib/auth/server';
 
 export async function createWatchlist(formData: FormData) {
   const user = await getCurrentUser();
-  if (!user) throw new Error('Not signed in');
+  if (!user) return;
 
   const year = formData.get('year')?.toString().trim();
   const make = formData.get('make')?.toString().trim();
@@ -15,6 +15,8 @@ export async function createWatchlist(formData: FormData) {
   const zip = formData.get('zip')?.toString().trim();
   const radius = formData.get('radius_miles')?.toString().trim();
   const maxPrice = formData.get('max_price')?.toString().trim();
+
+  if (!make || !model) return;
 
   const supabase = await getSupabaseServer();
 
@@ -31,21 +33,25 @@ export async function createWatchlist(formData: FormData) {
     enabled: true
   });
 
-  if (error) throw new Error(error.message);
+  if (error) return;
 
   revalidatePath('/watchlists');
 }
 
 export async function toggleWatchlist(id: string, enabled: boolean) {
+  const user = await getCurrentUser();
+  if (!user) return;
   const supabase = await getSupabaseServer();
   const { error } = await supabase.from('watchlists').update({ enabled }).eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) return;
   revalidatePath('/watchlists');
 }
 
 export async function deleteWatchlist(id: string) {
+  const user = await getCurrentUser();
+  if (!user) return;
   const supabase = await getSupabaseServer();
   const { error } = await supabase.from('watchlists').delete().eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) return;
   revalidatePath('/watchlists');
 }
