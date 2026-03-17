@@ -32,6 +32,7 @@ Optional (Ollama):
 Optional (safety/env):
 
 - `AXLE_ENV=local` — enables dev-only endpoints/scripts that are disabled elsewhere (e.g. the watchlists runner stub + smoke tests). Keep this set to `local` for your dev Supabase.
+  - If you see "Refusing to run watchlists-smoke against a potentially production environment", it usually means `AXLE_ENV` is missing from `.env.local`.
 
 ## Run
 
