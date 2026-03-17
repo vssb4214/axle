@@ -13,13 +13,15 @@ export default async function WatchlistsPage() {
         <div className="card p-4 text-sm text-slate-300">
           Sign in to create alerts for cars you&apos;re hunting.
         </div>
-        <Link href="/auth" className="btn-primary">Sign in</Link>
+        <Link href="/auth" className="btn-primary">
+          Sign in
+        </Link>
       </div>
     );
   }
 
   const supabase = await getSupabaseServer();
-  const { data: watchlists } = await supabase
+  const { data: watchlists, error } = await supabase
     .from('watchlists')
     .select('*')
     .order('created_at', { ascending: false });
@@ -34,14 +36,32 @@ export default async function WatchlistsPage() {
       </div>
 
       <form action={createWatchlist} className="card space-y-4 p-6">
+        {error ? (
+          <div className="rounded-lg border border-amber-700/60 bg-amber-900/20 p-3 text-xs text-amber-200">
+            Watchlists aren’t set up yet (or Supabase is misconfigured). Create the `watchlists` table using
+            SUPABASE_MIGRATIONS.md, then reload.
+            <div className="mt-1 text-amber-300/80">Error: {error.message}</div>
+          </div>
+        ) : null}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="block text-xs font-medium text-slate-300">Make</label>
-            <input name="make" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="e.g. Toyota" />
+            <input
+              name="make"
+              required
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+              placeholder="e.g. Toyota"
+            />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-300">Model</label>
-            <input name="model" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="e.g. Tacoma" />
+            <input
+              name="model"
+              required
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+              placeholder="e.g. Tacoma"
+            />
           </div>
         </div>
 
@@ -76,7 +96,9 @@ export default async function WatchlistsPage() {
           <input name="radius_miles" type="number" className="mt-1 w-40 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="200" />
         </div>
 
-        <button type="submit" className="btn-primary">Create watchlist</button>
+        <button type="submit" className="btn-primary" disabled={!!error}>
+          Create watchlist
+        </button>
         <p className="text-xs text-slate-500">
           Tip: Watchlists require the `watchlists` table. If it isn&apos;t created yet, the page will still load, but actions may be disabled.
         </p>
