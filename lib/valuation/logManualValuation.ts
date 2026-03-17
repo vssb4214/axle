@@ -39,7 +39,7 @@ export async function logManualValuation(input: {
   city?: string | null;
   state?: string | null;
   valuation: ValuationResult;
-}) {
+}): Promise<{ id: string } | null> {
   try {
     const segment = getCarSegment(input.make, input.model);
 
@@ -65,9 +65,17 @@ export async function logManualValuation(input: {
       segment
     };
 
-    await supabaseAdmin.from('manual_valuations').insert(row);
+    const { data, error } = await supabaseAdmin
+      .from('manual_valuations')
+      .insert(row)
+      .select('id')
+      .single();
+
+    if (error || !data?.id) return null;
+    return { id: data.id };
   } catch {
-    // fire-and-forget; never break the page
+    // Never break the page.
+    return null;
   }
 }
 

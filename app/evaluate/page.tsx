@@ -206,9 +206,9 @@ export default async function EvaluatePage({
         explanation = null;
       }
 
-      // Fire-and-forget logging of this evaluation for the current user.
+      // Log this evaluation and create a shareable report link.
       const currentUser = await getCurrentUser();
-      void logManualValuation({
+      const report = await logManualValuation({
         user_id: currentUser?.id ?? null,
         year,
         make,
@@ -224,6 +224,11 @@ export default async function EvaluatePage({
         state: null,
         valuation
       });
+
+      // Attach report id to the valuation object for rendering a share link.
+      if (report?.id) {
+        (valuation as any).__report_id = report.id;
+      }
     }
   }
 

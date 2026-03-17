@@ -158,6 +158,15 @@ export function EvaluatorResults({ year, make, model, trim, valuation, comps, er
             >
               List this car with suggested price
             </Link>
+
+            {(valuation as any).__report_id ? (
+              <Link
+                href={`/reports/${(valuation as any).__report_id}`}
+                className="btn-secondary"
+              >
+                Share valuation report
+              </Link>
+            ) : null}
           </div>
 
           {explanation && (
