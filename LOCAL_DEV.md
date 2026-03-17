@@ -67,7 +67,10 @@ If Ollama is down, Axle should still work — only the extraction/explanations a
 
 ```bash
 pnpm lint
+pnpm test
 pnpm build
 ```
 
-If `pnpm build` passes, the project is in a decent state to move to Vercel later.
+Notes:
+- `pnpm test` currently runs: lint + build (fast sanity check)
+- `pnpm build` is what matters most for deploy readiness
