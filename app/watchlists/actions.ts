@@ -42,7 +42,11 @@ export async function toggleWatchlist(id: string, enabled: boolean) {
   const user = await getCurrentUser();
   if (!user) return;
   const supabase = await getSupabaseServer();
-  const { error } = await supabase.from('watchlists').update({ enabled }).eq('id', id);
+  const { error } = await supabase
+    .from('watchlists')
+    .update({ enabled })
+    .eq('id', id)
+    .eq('user_id', user.id);
   if (error) return;
   revalidatePath('/watchlists');
 }
@@ -51,7 +55,11 @@ export async function deleteWatchlist(id: string) {
   const user = await getCurrentUser();
   if (!user) return;
   const supabase = await getSupabaseServer();
-  const { error } = await supabase.from('watchlists').delete().eq('id', id);
+  const { error } = await supabase
+    .from('watchlists')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id);
   if (error) return;
   revalidatePath('/watchlists');
 }
