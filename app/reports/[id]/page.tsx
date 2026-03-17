@@ -1,5 +1,8 @@
 import Link from 'next/link';
 import { supabaseClient } from '@/lib/db/client';
+import { collectComparableListings } from '@/lib/comps/fetchComps';
+import { filterComparableComps } from '@/lib/valuation/engine';
+import { CopyLinkButton } from '@/components/reports/CopyLinkButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +31,70 @@ export default async function ReportPage({ params }: { params: { id: string } })
 
   const title = `${data.year} ${data.make} ${data.model}${data.trim ? ` ${data.trim}` : ''}`.trim();
 
+  function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+      p.then(
+        (v) => {
+          clearTimeout(t);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(t);
+          reject(e);
+        }
+      );
+    });
+  }
+
+  // Fetch comps live for transparency. Keep it fast; degrade gracefully.
+  let comps: any[] = [];
+  let compErrors: any[] = [];
+  try {
+    const compResult = await withTimeout(
+      collectComparableListings({
+        year: data.year,
+        make: data.make,
+        model: data.model,
+        trim: data.trim ?? null,
+        mileage: data.mileage,
+        city: null,
+        state: null,
+        zip: null
+      }),
+      2800
+    );
+    comps = compResult.comps;
+    compErrors = compResult.errors;
+  } catch {
+    comps = [];
+    compErrors = [{ source: 'system', message: 'Comparable fetch timed out.' }];
+  }
+
+  const compsUsed = comps.length
+    ? filterComparableComps(
+        {
+          year: data.year,
+          make: data.make,
+          model: data.model,
+          trim: data.trim ?? null,
+          mileage: data.mileage,
+          city: null,
+          state: null,
+          condition: data.condition ?? null,
+          transmission: data.transmission ?? null,
+          color: data.color ?? null,
+          mods: data.mods ?? null,
+          wear: data.wear ?? null,
+          wear_issues: null,
+          wear_costs: null
+        },
+        comps
+      )
+    : [];
+
+  const shareUrl = `/reports/${id}`;
+
   return (
     <div className="w-full max-w-2xl space-y-6">
       <div className="space-y-2">
@@ -51,6 +118,21 @@ export default async function ReportPage({ params }: { params: { id: string } })
         <div className="text-sm text-slate-300">
           Mid: <span className="font-semibold text-white">${Math.round(data.value_mid / 100) / 10}k</span>
         </div>
+        <div className="flex flex-wrap gap-3 pt-2">
+          <CopyLinkButton url={shareUrl} />
+          <Link href="/evaluate" className="btn-secondary">Run another</Link>
+          <Link href="/browse" className="btn-secondary">Browse listings</Link>
+        </div>
+      </div>
+
+      <div className="card p-4">
+        <div className="text-sm font-semibold">Why this price</div>
+        <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
+          <li>• Based on {data.comp_count} comps and a segment-specific mileage/age curve.</li>
+          <li>• Confidence is driven by comp count and how tight the computed range is.</li>
+          <li>• Dealer asking prices are discounted to approximate private-party value.</li>
+          <li>• We do not fabricate comps. If sources fail, confidence drops.</li>
+        </ul>
       </div>
 
       <div className="card p-4">
@@ -63,9 +145,40 @@ export default async function ReportPage({ params }: { params: { id: string } })
         </div>
       </div>
 
-      <div className="flex gap-3">
-        <Link href="/evaluate" className="btn-secondary">Run another</Link>
-        <Link href="/browse" className="btn-secondary">Browse listings</Link>
+      <div className="card p-4">
+        <div className="text-sm font-semibold">Comparable listings (live)</div>
+        <p className="mt-1 text-xs text-slate-400">Top matches we can find right now for transparency.</p>
+        {compsUsed.length > 0 ? (
+          <ul className="mt-3 space-y-2">
+            {compsUsed.slice(0, 10).map((c: any, idx: number) => (
+              <li key={idx} className="rounded-lg bg-slate-900/70 p-3 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-medium text-white">
+                    {c.year} {c.make} {c.model}{c.trim ? ` ${c.trim}` : ''}
+                  </div>
+                  <div className="text-emerald-300">{c.asking_price != null ? `$${c.asking_price.toLocaleString()}` : '—'}</div>
+                </div>
+                <div className="mt-1 text-slate-400">
+                  {c.mileage != null ? `${c.mileage.toLocaleString()} mi` : ''}
+                  {c.city && c.state ? ` · ${c.city}, ${c.state}` : ''}
+                  {c.source ? ` · ${c.source}` : ''}
+                </div>
+                {c.source_url ? (
+                  <a className="mt-1 inline-block text-brand hover:underline" href={c.source_url} target="_blank" rel="noreferrer">
+                    View source
+                  </a>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="mt-3 text-xs text-slate-300">No comps available right now.</div>
+        )}
+        {compErrors?.length ? (
+          <div className="mt-3 text-[11px] text-slate-500">
+            Some sources unavailable: {compErrors.map((e: any) => e.source).filter(Boolean).join(', ')}
+          </div>
+        ) : null}
       </div>
 
       <p className="text-xs text-slate-500">
