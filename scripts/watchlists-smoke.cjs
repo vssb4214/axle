@@ -1,0 +1,75 @@
+require('dotenv').config({ path: '.env.local' });
+const { createClient } = require('@supabase/supabase-js');
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+async function main() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local to run this script.');
+  }
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  // 1) Ensure the table exists (migration applied).
+  const { error: tableErr } = await supabase.from('watchlists').select('id').limit(1);
+  if (tableErr) {
+    throw new Error(
+      `watchlists table check failed: ${tableErr.message}\n` +
+        'Did you run the SQL in SUPABASE_MIGRATIONS.md (Watchlists migration) in the Supabase SQL editor?'
+    );
+  }
+
+  // 2) Find a user to attach the watchlist to (seed creates one).
+  const { data: user, error: userErr } = await supabase.from('users').select('id,email').limit(1).maybeSingle();
+  if (userErr) throw new Error(`users lookup failed: ${userErr.message}`);
+  if (!user?.id) {
+    throw new Error('No users found. Create a user (sign up) or run `pnpm seed`, then rerun this script.');
+  }
+
+  // 3) Insert a watchlist row.
+  const insertRow = {
+    user_id: user.id,
+    year: 2012,
+    make: 'Toyota',
+    model: 'Tacoma',
+    trim: 'TRD Off-Road',
+    max_mileage: 140000,
+    zip: '78701',
+    radius_miles: 250,
+    max_price: 18000,
+    enabled: true
+  };
+
+  const { data: created, error: createErr } = await supabase
+    .from('watchlists')
+    .insert(insertRow)
+    .select('*')
+    .single();
+
+  if (createErr || !created?.id) {
+    throw new Error(`watchlists insert failed: ${createErr?.message ?? 'unknown error'}`);
+  }
+
+  // 4) Toggle enabled.
+  const { error: updateErr } = await supabase.from('watchlists').update({ enabled: false }).eq('id', created.id);
+  if (updateErr) throw new Error(`watchlists update failed: ${updateErr.message}`);
+
+  // 5) Read back.
+  const { data: fetched, error: fetchErr } = await supabase.from('watchlists').select('*').eq('id', created.id).single();
+  if (fetchErr) throw new Error(`watchlists readback failed: ${fetchErr.message}`);
+  if (fetched.enabled !== false) throw new Error('watchlists enabled toggle did not persist');
+
+  // 6) Delete.
+  const { error: deleteErr } = await supabase.from('watchlists').delete().eq('id', created.id);
+  if (deleteErr) throw new Error(`watchlists delete failed: ${deleteErr.message}`);
+
+  // eslint-disable-next-line no-console
+  console.log(`OK: watchlists CRUD works (user: ${user.email ?? user.id}).`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+
