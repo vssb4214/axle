@@ -4,10 +4,35 @@ const { createClient } = require('@supabase/supabase-js');
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+function requireNoProd() {
+  // Safety: never run smoke tests against prod.
+  // Allow explicit override only if someone truly intends it.
+  const allowProd = process.env.AXLE_ALLOW_PROD === '1';
+
+  // Heuristics: Supabase project refs are typically the subdomain.
+  // If you know your prod ref, add it here.
+  const url = SUPABASE_URL ?? '';
+  const looksLikeProd =
+    /prod/i.test(process.env.NEXT_PUBLIC_APP_ENV ?? '') ||
+    /prod/i.test(process.env.VERCEL_ENV ?? '') ||
+    /prod/i.test(process.env.NODE_ENV ?? '') ||
+    /\.supabase\.co/.test(url) === false;
+
+  if (allowProd) return;
+  if (looksLikeProd) {
+    throw new Error(
+      'Refusing to run watchlists-smoke against a potentially production environment.\n' +
+        'Set AXLE_ALLOW_PROD=1 to override (not recommended), or ensure .env.local points at a dev/staging Supabase project.'
+    );
+  }
+}
+
 async function main() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local to run this script.');
   }
+
+  requireNoProd();
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -41,11 +66,7 @@ async function main() {
     enabled: true
   };
 
-  const { data: created, error: createErr } = await supabase
-    .from('watchlists')
-    .insert(insertRow)
-    .select('*')
-    .single();
+  const { data: created, error: createErr } = await supabase.from('watchlists').insert(insertRow).select('*').single();
 
   if (createErr || !created?.id) {
     throw new Error(`watchlists insert failed: ${createErr?.message ?? 'unknown error'}`);
@@ -72,4 +93,3 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-
