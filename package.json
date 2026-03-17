@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "seed": "node scripts/seed.cjs",
+    "test": "pnpm -s lint && pnpm -s build",
     "watchlists:smoke": "node scripts/watchlists-smoke.cjs"
   },
   "dependencies": {
