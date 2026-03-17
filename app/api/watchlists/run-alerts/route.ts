@@ -28,8 +28,9 @@ export async function GET(req: Request) {
     // NOTE: This is a stub runner for local/dev. It deliberately does NOT send notifications.
     // In production this should be protected (cron secret, internal auth, etc).
     // Safety: refuse to run unless explicitly in local/dev mode.
-    if (process.env.AXLE_ENV !== 'local') {
-      throw new HttpError('Watchlists runner is disabled outside local/dev.', {
+    const env = process.env.AXLE_ENV;
+    if (env !== 'local' && env !== 'dev') {
+      throw new HttpError(`Watchlists runner is disabled outside local/dev (AXLE_ENV=${env ?? 'unset'}).`, {
         status: 403,
         code: 'RUNNER_DISABLED'
       });
