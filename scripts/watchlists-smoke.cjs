@@ -16,7 +16,11 @@ function requireNoProd() {
     /prod/i.test(process.env.NEXT_PUBLIC_APP_ENV ?? '') ||
     /prod/i.test(process.env.VERCEL_ENV ?? '') ||
     /prod/i.test(process.env.NODE_ENV ?? '') ||
-    /\.supabase\.co/.test(url) === false;
+    // If it's not a supabase.co project URL at all, it's suspicious (could be something else).
+    /\.supabase\.co/.test(url) === false ||
+    // If it *is* a supabase.co URL, we still treat it as potentially prod by default.
+    // This script uses the service role key and performs writes.
+    /\.supabase\.co/.test(url) === true;
 
   if (allowProd) return;
   if (looksLikeProd) {
