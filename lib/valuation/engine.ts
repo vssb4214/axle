@@ -29,6 +29,8 @@ export type ListingInput = {
   wear_costs?: { label: string; parts_cost: number; labor_hours: number; category: string }[] | null;
   /** Structured condition profile – single source of truth when present. */
   conditionProfile?: VehicleConditionProfile | null;
+  /** Normalized vehicle key for variant-level matching (set when VIN-derived data is available). */
+  vehicleKey?: string | null;
 };
 
 export type IssueCode =
