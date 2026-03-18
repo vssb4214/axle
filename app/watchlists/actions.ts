@@ -3,37 +3,50 @@
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser, getSupabaseServer } from '@/lib/auth/server';
 
+function parseOptionalInt(raw: FormDataEntryValue | null) {
+  const s = raw?.toString().trim();
+  if (!s) return null;
+  const n = Number.parseInt(s, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function createWatchlist(formData: FormData) {
   const user = await getCurrentUser();
-  if (!user) return;
+  if (!user) throw new Error('Not signed in.');
 
-  const year = formData.get('year')?.toString().trim();
   const make = formData.get('make')?.toString().trim();
   const model = formData.get('model')?.toString().trim();
-  const trim = formData.get('trim')?.toString().trim();
-  const maxMileage = formData.get('max_mileage')?.toString().trim();
-  const zip = formData.get('zip')?.toString().trim();
-  const radius = formData.get('radius_miles')?.toString().trim();
-  const maxPrice = formData.get('max_price')?.toString().trim();
 
-  if (!make || !model) return;
+  if (!make || !model) throw new Error('Make and model are required.');
+
+  const year = parseOptionalInt(formData.get('year'));
+  const maxMileage = parseOptionalInt(formData.get('max_mileage'));
+  const radius = parseOptionalInt(formData.get('radius_miles'));
+  const maxPrice = parseOptionalInt(formData.get('max_price'));
+
+  const trim = formData.get('trim')?.toString().trim() || null;
+  const zip = formData.get('zip')?.toString().trim() || null;
+
+  if (zip && !/^[0-9]{5}$/.test(zip)) {
+    throw new Error('ZIP must be a 5-digit US ZIP code.');
+  }
 
   const supabase = await getSupabaseServer();
 
   const { error } = await supabase.from('watchlists').insert({
     user_id: user.id,
-    year: year ? parseInt(year, 10) : null,
-    make: make || null,
-    model: model || null,
-    trim: trim || null,
-    max_mileage: maxMileage ? parseInt(maxMileage, 10) : null,
-    zip: zip || null,
-    radius_miles: radius ? parseInt(radius, 10) : null,
-    max_price: maxPrice ? parseInt(maxPrice, 10) : null,
+    year,
+    make,
+    model,
+    trim,
+    max_mileage: maxMileage,
+    zip,
+    radius_miles: radius,
+    max_price: maxPrice,
     enabled: true
   });
 
-  if (error) return;
+  if (error) throw new Error(error.message);
 
   revalidatePath('/watchlists');
 }

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getCurrentUser, getSupabaseServer } from '@/lib/auth/server';
 import { createWatchlist, deleteWatchlist, toggleWatchlist } from './actions';
+import WatchlistCreateForm from './watchlist-create-form';
 import RunAlertsPanel from './run-alerts-panel';
 
 export const dynamic = 'force-dynamic';
@@ -36,74 +37,17 @@ export default async function WatchlistsPage() {
         </p>
       </div>
 
-      <form action={createWatchlist} className="card space-y-4 p-6">
-        {error ? (
+      {error ? (
+        <div className="card space-y-2 p-4 text-sm">
           <div className="rounded-lg border border-amber-700/60 bg-amber-900/20 p-3 text-xs text-amber-200">
-            Watchlists aren’t set up yet (or Supabase is misconfigured). Create the `watchlists` table using
+            Watchlists aren’t set up yet (or Supabase is misconfigured). Create the <code>watchlists</code> table using
             SUPABASE_MIGRATIONS.md, then reload.
             <div className="mt-1 text-amber-300/80">Error: {error.message}</div>
           </div>
-        ) : null}
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="block text-xs font-medium text-slate-300">Make</label>
-            <input
-              name="make"
-              required
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
-              placeholder="e.g. Toyota"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-300">Model</label>
-            <input
-              name="model"
-              required
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
-              placeholder="e.g. Tacoma"
-            />
-          </div>
         </div>
+      ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="block text-xs font-medium text-slate-300">Year (optional)</label>
-            <input name="year" type="number" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="2012" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-300">Trim (optional)</label>
-            <input name="trim" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="TRD Off-Road" />
-          </div>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div>
-            <label className="block text-xs font-medium text-slate-300">Max mileage</label>
-            <input name="max_mileage" type="number" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="120000" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-300">Max price ($)</label>
-            <input name="max_price" type="number" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="18000" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-300">ZIP</label>
-            <input name="zip" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="92101" />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-slate-300">Radius (miles)</label>
-          <input name="radius_miles" type="number" className="mt-1 w-40 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="200" />
-        </div>
-
-        <button type="submit" className="btn-primary" disabled={!!error}>
-          Create watchlist
-        </button>
-        <p className="text-xs text-slate-500">
-          Tip: Watchlists require the `watchlists` table. If it isn&apos;t created yet, the page will still load, but actions may be disabled.
-        </p>
-      </form>
+      <WatchlistCreateForm action={createWatchlist} disabled={!!error} />
 
       <div className="card p-6">
         <div className="flex items-center justify-between">
