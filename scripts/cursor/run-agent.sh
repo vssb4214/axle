@@ -32,14 +32,6 @@ cd "$ROOT_DIR"
 
 echo "[cursor] running agent in $ROOT_DIR"
 
-# Prefer a PTY only when supported. In some non-interactive runners, `script` can't ioctl.
-if command -v script >/dev/null 2>&1; then
-  if _timeout env -i HOME="$HOME" PATH="$ENV_PATH" TERM="xterm-256color" script -q /dev/null "$CURSOR_BIN" --help >/dev/null 2>&1; then
-    _timeout env -i HOME="$HOME" PATH="$ENV_PATH" TERM="xterm-256color" \
-      script -q /dev/null "$CURSOR_BIN" agent "$TASK"
-    exit 0
-  fi
-  echo "[cursor] PTY wrapper (script) not supported in this environment; running without PTY" >&2
-fi
-
+# Cursor agent CLI is unstable headless in some environments.
+# Always run with a hard timeout; run without PTY here (PTY not supported in this runner).
 _timeout env -i HOME="$HOME" PATH="$ENV_PATH" TERM="xterm-256color" "$CURSOR_BIN" agent "$TASK"
