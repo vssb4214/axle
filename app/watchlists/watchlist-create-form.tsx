@@ -63,6 +63,8 @@ export default function WatchlistCreateForm({ action, disabled }: Props) {
           <input
             name="make"
             required
+            autoCapitalize="words"
+            autoCorrect="off"
             disabled={disabled}
             className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
             placeholder="e.g. Toyota"
@@ -73,6 +75,8 @@ export default function WatchlistCreateForm({ action, disabled }: Props) {
           <input
             name="model"
             required
+            autoCapitalize="words"
+            autoCorrect="off"
             disabled={disabled}
             className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
             placeholder="e.g. Tacoma"
