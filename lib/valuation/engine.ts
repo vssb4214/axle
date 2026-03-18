@@ -5,6 +5,7 @@ import {
   getAgeDepreciationPerYear,
   type CarSegment
 } from './segments';
+import { vehicleKeyFromFields, vehicleKeyMatchScore, parseVehicleKey, type VehicleKey } from '@/lib/vin/vehicleKey';
 
 export type ListingInput = {
   year: number;
@@ -21,6 +22,8 @@ export type ListingInput = {
   wear?: string | null;
   wear_issues?: IssueCode[] | null;
   wear_costs?: { label: string; parts_cost: number; labor_hours: number; category: string }[] | null;
+  /** VIN-derived normalized vehicle key for tighter variant matching. */
+  vehicleKey?: string | null;
 };
 
 export type IssueCode =
@@ -97,6 +100,9 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
   const wantsMobility = /\bmobility\b|wheelchair|handicap|accessible/.test(listingText);
   const listingDisp = extractDisplacementLiters(`${listing.model ?? ''} ${listing.trim ?? ''}`);
 
+  const subjectKey: VehicleKey | null = listing.vehicleKey || null;
+  const subjectParts = subjectKey ? parseVehicleKey(subjectKey) : null;
+
   return comps.filter((c) => {
     if (!c.asking_price || !c.year) return false;
     if (!c.make || norm(c.make) !== norm(listing.make)) return false;
@@ -108,6 +114,17 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
       const compText = `${c.trim ?? ''} ${c.source_title ?? ''}`.toLowerCase();
       if (/\bmobility\b|auto access|wheelchair|handicap|accessible/.test(compText)) return false;
     }
+
+    // VIN-based engine/drivetrain guard: when the subject has a vehicleKey with engine data,
+    // score the comp against it. Low scores indicate a different variant (e.g. Z4 2.5 vs 3.0).
+    if (subjectKey && subjectParts?.engine) {
+      const compKey = c.vehicleKey
+        ? c.vehicleKey
+        : vehicleKeyFromFields({ make: c.make ?? '', model: c.model ?? '', trim: c.trim, year: c.year });
+      const score = vehicleKeyMatchScore(subjectKey, compKey);
+      if (score < 0.45) return false;
+    }
+
     // Generic engine-variant guard: when both imply a displacement, require close match.
     if (listingDisp != null) {
       const compDisp = extractDisplacementLiters(`${c.model ?? ''} ${c.trim ?? ''} ${c.source_title ?? ''}`);

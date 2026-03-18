@@ -19,6 +19,7 @@ export async function ollamaFilterCompatibleComps(input: {
   listingTitle: string;
   listingTrim: string | null;
   comps: NormalizedComp[];
+  vehicleKey?: string | null;
 }): Promise<number[] | null> {
   const k = keyFor(input.listingTitle, input.comps);
   const hit = cache.get(k);
@@ -42,7 +43,10 @@ Return ONLY JSON: { "keep_indices": number[] } where indices refer to the provid
 If unsure, keep more rather than fewer, but remove clearly incompatible variants.
 `;
 
-  const userPrompt = `Listing: ${input.listingTitle}${input.listingTrim ? ` (trim: ${input.listingTrim})` : ''}
+  const vehicleKeyNote = input.vehicleKey
+    ? `\nVehicle key (VIN-derived, normalized): ${input.vehicleKey}`
+    : '';
+  const userPrompt = `Listing: ${input.listingTitle}${input.listingTrim ? ` (trim: ${input.listingTrim})` : ''}${vehicleKeyNote}
 
 Comps:
 ${compsList}
