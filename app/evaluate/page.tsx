@@ -6,13 +6,12 @@ import { ollamaExplainText } from '@/lib/ollama/client';
 import { ollamaRefineValuation } from '@/lib/ollama/refineValuation';
 import { extractIssuesFromText } from '@/lib/ollama/extractIssues';
 import { extractWearCostsFromText } from '@/lib/ollama/extractWearCosts';
+import { extractConditionProfile } from '@/lib/ollama/extractConditionProfile';
 import { ollamaFilterCompatibleComps } from '@/lib/ollama/filterComps';
 import { logManualValuation } from '@/lib/valuation/logManualValuation';
 import { getCurrentUser } from '@/lib/auth/server';
 import { EvaluatorForm } from '@/components/evaluate/EvaluatorForm';
 import { EvaluatorResults } from '@/components/evaluate/EvaluatorResults';
-import { decodeVinNhtsa } from '@/lib/vin/nhtsa';
-import { vehicleKeyFromDecode } from '@/lib/vin/vehicleKey';
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -31,7 +30,6 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 type SearchParams = {
-  vin?: string;
   year?: string;
   make?: string;
   model?: string;
@@ -50,28 +48,9 @@ export default async function EvaluatePage({
 }: {
   searchParams: SearchParams;
 }) {
-  // VIN decode: when a VIN is provided, decode it and use the result to fill/override fields.
-  const rawVin = (searchParams?.vin ?? '').trim();
-  let vinDecode: Awaited<ReturnType<typeof decodeVinNhtsa>> | null = null;
-  let vehicleKey: string | null = null;
-  let vinError: string | null = null;
-
-  if (rawVin) {
-    vinDecode = await decodeVinNhtsa(rawVin);
-    if (vinDecode.errorText && !vinDecode.make) {
-      vinError = vinDecode.errorText;
-      vinDecode = null;
-    } else {
-      vehicleKey = vehicleKeyFromDecode(vinDecode);
-    }
-  }
-
-  // VIN-decoded fields override manual params when available.
-  // Use the raw NHTSA strings (not lowercased) so source APIs get proper casing.
-  const year = vinDecode?.modelYear ?? (searchParams?.year ? parseInt(searchParams.year, 10) : 0);
-  const make = vinDecode?.make ?? (searchParams?.make ?? '').trim();
-  const model = vinDecode?.model ?? (searchParams?.model ?? '').trim();
-  const trim = vinDecode?.trim || (searchParams?.trim?.trim() || null);
+  const year = searchParams?.year ? parseInt(searchParams.year, 10) : 0;
+  const make = (searchParams?.make ?? '').trim();
+  const model = (searchParams?.model ?? '').trim();
   const mileage = searchParams?.mileage ? parseInt(searchParams.mileage, 10) : 0;
 
   const hasQuery = year > 0 && make && model && mileage > 0;
@@ -87,12 +66,12 @@ export default async function EvaluatePage({
       year,
       make,
       model,
-      trim: trim ?? null,
+      trim: searchParams?.trim?.trim() || null,
       mileage,
       city: null,
       state: null,
       zip: searchParams?.zip?.trim() || null,
-      vehicleKey,
+      radius_miles: null
     };
     try {
       const compResult = await collectComparableListings(query);
@@ -107,7 +86,7 @@ export default async function EvaluatePage({
       year,
       make,
       model,
-      trim: trim ?? null,
+      trim: searchParams?.trim?.trim() || null,
       mileage,
       city: null,
       state: null,
@@ -118,7 +97,7 @@ export default async function EvaluatePage({
       wear: searchParams?.wear?.trim() || null,
       wear_issues: null as null | IssueCode[],
       wear_costs: null as null | { label: string; parts_cost: number; labor_hours: number; category: string }[],
-      vehicleKey,
+      conditionProfile: null as null | Awaited<ReturnType<typeof extractConditionProfile>>
     };
 
     // Optional: use Ollama extraction model to map arbitrary wear text into standardized issues.
@@ -164,6 +143,25 @@ export default async function EvaluatePage({
       }
     }
 
+    // Extract structured condition profile from combined condition/wear/mods text.
+    const profileText = [
+      listingInput.condition ? `Overall condition: ${listingInput.condition}` : '',
+      listingInput.wear ? `Wear/issues: ${listingInput.wear}` : '',
+      listingInput.mods ? `Modifications: ${listingInput.mods}` : '',
+    ].filter(Boolean).join('\n');
+
+    if (profileText) {
+      try {
+        const profile = await withTimeout(
+          extractConditionProfile({ rawText: profileText, year, make, model }),
+          2000
+        );
+        if (profile) listingInput.conditionProfile = profile;
+      } catch {
+        // Profile extraction is optional; fall back to string-based scoring.
+      }
+    }
+
     const baseValuation = computeDeterministicValuation(listingInput, comps) ?? computeFallbackValuation(listingInput);
     compsUsedForValuation = comps.length > 0 ? filterComparableComps(listingInput, comps) : [];
 
@@ -176,8 +174,7 @@ export default async function EvaluatePage({
           ollamaFilterCompatibleComps({
             listingTitle: title,
             listingTrim: listingInput.trim ?? null,
-            comps: compsUsedForValuation,
-            vehicleKey,
+            comps: compsUsedForValuation
           }),
           1800
         );
@@ -237,7 +234,7 @@ export default async function EvaluatePage({
         year,
         make,
         model,
-        trim: trim ?? null,
+        trim: searchParams?.trim?.trim() || null,
         mileage,
         condition: searchParams?.condition?.trim() || null,
         transmission: searchParams?.transmission?.trim() || null,
@@ -266,11 +263,10 @@ export default async function EvaluatePage({
       </div>
 
       <EvaluatorForm
-        defaultVin={searchParams?.vin}
-        defaultYear={vinDecode?.modelYear ? String(vinDecode.modelYear) : searchParams?.year}
-        defaultMake={vinDecode?.make || searchParams?.make}
-        defaultModel={vinDecode?.model || searchParams?.model}
-        defaultTrim={vinDecode?.trim || searchParams?.trim}
+        defaultYear={searchParams?.year}
+        defaultMake={searchParams?.make}
+        defaultModel={searchParams?.model}
+        defaultTrim={searchParams?.trim}
         defaultMileage={searchParams?.mileage}
         defaultCondition={searchParams?.condition}
         defaultTransmission={searchParams?.transmission}
@@ -279,21 +275,6 @@ export default async function EvaluatePage({
         defaultMods={searchParams?.mods}
         defaultWear={searchParams?.wear}
       />
-
-      {vinError && (
-        <div className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">
-          VIN decode warning: {vinError}
-        </div>
-      )}
-
-      {vehicleKey && (
-        <div className="rounded-lg bg-slate-800/60 p-3 text-xs text-slate-400">
-          VIN-derived vehicle key: <code className="text-slate-300">{vehicleKey}</code>
-          {vinDecode?.driveType && <span className="ml-2">· {vinDecode.driveType}</span>}
-          {vinDecode?.engineDisplacementL && <span className="ml-2">· {vinDecode.engineDisplacementL}L</span>}
-          {vinDecode?.engineCylinders && <span className="ml-2">· {vinDecode.engineCylinders}-cyl</span>}
-        </div>
-      )}
 
       {hasQuery && (
         <EvaluatorResults

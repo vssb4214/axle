@@ -5,7 +5,12 @@ import {
   getAgeDepreciationPerYear,
   type CarSegment
 } from './segments';
-import { vehicleKeyFromFields, vehicleKeyMatchScore, parseVehicleKey, type VehicleKey } from '@/lib/vin/vehicleKey';
+import type { VehicleConditionProfile } from '@/lib/vehicle/condition';
+import {
+  conditionMultiplierFromProfile,
+  modsMultiplierFromProfile,
+  explainConditionImpact,
+} from '@/lib/vehicle/condition';
 
 export type ListingInput = {
   year: number;
@@ -22,8 +27,8 @@ export type ListingInput = {
   wear?: string | null;
   wear_issues?: IssueCode[] | null;
   wear_costs?: { label: string; parts_cost: number; labor_hours: number; category: string }[] | null;
-  /** VIN-derived normalized vehicle key for tighter variant matching. */
-  vehicleKey?: string | null;
+  /** Structured condition profile – single source of truth when present. */
+  conditionProfile?: VehicleConditionProfile | null;
 };
 
 export type IssueCode =
@@ -100,9 +105,6 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
   const wantsMobility = /\bmobility\b|wheelchair|handicap|accessible/.test(listingText);
   const listingDisp = extractDisplacementLiters(`${listing.model ?? ''} ${listing.trim ?? ''}`);
 
-  const subjectKey: VehicleKey | null = listing.vehicleKey || null;
-  const subjectParts = subjectKey ? parseVehicleKey(subjectKey) : null;
-
   return comps.filter((c) => {
     if (!c.asking_price || !c.year) return false;
     if (!c.make || norm(c.make) !== norm(listing.make)) return false;
@@ -114,17 +116,6 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
       const compText = `${c.trim ?? ''} ${c.source_title ?? ''}`.toLowerCase();
       if (/\bmobility\b|auto access|wheelchair|handicap|accessible/.test(compText)) return false;
     }
-
-    // VIN-based engine/drivetrain guard: when the subject has a vehicleKey with engine data,
-    // score the comp against it. Low scores indicate a different variant (e.g. Z4 2.5 vs 3.0).
-    if (subjectKey && subjectParts?.engine) {
-      const compKey = c.vehicleKey
-        ? c.vehicleKey
-        : vehicleKeyFromFields({ make: c.make ?? '', model: c.model ?? '', trim: c.trim, year: c.year });
-      const score = vehicleKeyMatchScore(subjectKey, compKey);
-      if (score < 0.45) return false;
-    }
-
     // Generic engine-variant guard: when both imply a displacement, require close match.
     if (listingDisp != null) {
       const compDisp = extractDisplacementLiters(`${c.model ?? ''} ${c.trim ?? ''} ${c.source_title ?? ''}`);
@@ -679,10 +670,15 @@ export function computeDeterministicValuation(
     if (listing.state && comp.state && listing.state.toUpperCase() === comp.state.toUpperCase()) {
       weight *= 1.05;
     }
-    const condition = listing.condition ?? 'good';
-    weight *= conditionMultiplier(condition);
+    if (listing.conditionProfile) {
+      weight *= conditionMultiplierFromProfile(listing.conditionProfile);
+      weight *= modsMultiplierFromProfile(listing.conditionProfile.mods);
+    } else {
+      const condition = listing.condition ?? 'good';
+      weight *= conditionMultiplier(condition);
+      weight *= modsWeight(listing.mods ?? null);
+    }
     weight *= transmissionWeight(listing.transmission ?? null, segment);
-    weight *= modsWeight(listing.mods ?? null);
     weight *= wearFactorFromHardCosts(listing, segment, price);
 
     adjustedPrices.push(Math.round(price * weight));
@@ -730,21 +726,24 @@ export function computeDeterministicValuation(
   // Approximate "what moved the needle" breakdown, using the final mid as a reference price.
   const base = mid;
   const adj: { label: string; delta: number }[] = [];
-  const condition = listing.condition ?? 'good';
-  const conditionFactor = conditionMultiplier(condition);
-  if (conditionFactor !== 1) adj.push({ label: `Condition (${condition})`, delta: Math.round(base * (conditionFactor - 1)) });
+
+  if (listing.conditionProfile) {
+    adj.push(...explainConditionImpact(listing.conditionProfile, base));
+  } else {
+    const condition = listing.condition ?? 'good';
+    const conditionFactor = conditionMultiplier(condition);
+    if (conditionFactor !== 1) adj.push({ label: `Condition (${condition})`, delta: Math.round(base * (conditionFactor - 1)) });
+
+    const modsFactor = modsWeight(listing.mods ?? null);
+    if (modsFactor !== 1) adj.push({ label: 'Mods / upgrades', delta: Math.round(base * (modsFactor - 1)) });
+  }
 
   const transFactor = transmissionWeight(listing.transmission ?? null, segment);
   if (transFactor !== 1) adj.push({ label: `Transmission (${listing.transmission ?? 'n/a'})`, delta: Math.round(base * (transFactor - 1)) });
 
-  const modsFactor = modsWeight(listing.mods ?? null);
-  if (modsFactor !== 1) adj.push({ label: 'Mods / upgrades', delta: Math.round(base * (modsFactor - 1)) });
-
   const wearFactor = wearFactorFromHardCosts(listing, segment, base);
   if (wearFactor !== 1) adj.push({ label: 'Wear / repairs', delta: Math.round(base * (wearFactor - 1)) });
 
-  // Itemized upkeep/upgrades from user-provided text (conservative, value-preservation).
-  // This is separate from "market signals" (learned from comps text).
   const upkeepItems = estimateUpkeepAdjustments(listing, base);
   for (const it of upkeepItems) adj.push(it);
 
@@ -904,10 +903,15 @@ export function computeFallbackValuation(listing: ListingInput): ValuationResult
   mid = Math.max(800, mid - mileDiff * dollarsPerMile);
 
   // Apply the same multipliers used in the comp-based approach.
-  const condition = listing.condition ?? 'good';
-  mid *= conditionMultiplier(condition);
+  if (listing.conditionProfile) {
+    mid *= conditionMultiplierFromProfile(listing.conditionProfile);
+    mid *= modsMultiplierFromProfile(listing.conditionProfile.mods);
+  } else {
+    const condition = listing.condition ?? 'good';
+    mid *= conditionMultiplier(condition);
+    mid *= modsWeight(listing.mods ?? null);
+  }
   mid *= transmissionWeight(listing.transmission ?? null, segment);
-  mid *= modsWeight(listing.mods ?? null);
   mid *= wearFactorFromHardCosts(listing, segment, mid);
 
   // Wide range due to lack of comps.
@@ -923,14 +927,20 @@ export function computeFallbackValuation(listing: ListingInput): ValuationResult
   // Provide the same breakdown UI even without comps.
   const base = valueMid;
   const adj: { label: string; delta: number }[] = [];
-  const conditionFactor = conditionMultiplier(condition);
-  if (conditionFactor !== 1) adj.push({ label: `Condition (${condition})`, delta: Math.round(base * (conditionFactor - 1)) });
+
+  if (listing.conditionProfile) {
+    adj.push(...explainConditionImpact(listing.conditionProfile, base));
+  } else {
+    const condition = listing.condition ?? 'good';
+    const conditionFactor = conditionMultiplier(condition);
+    if (conditionFactor !== 1) adj.push({ label: `Condition (${condition})`, delta: Math.round(base * (conditionFactor - 1)) });
+
+    const modsFactor = modsWeight(listing.mods ?? null);
+    if (modsFactor !== 1) adj.push({ label: 'Mods / upgrades', delta: Math.round(base * (modsFactor - 1)) });
+  }
 
   const transFactor = transmissionWeight(listing.transmission ?? null, segment);
   if (transFactor !== 1) adj.push({ label: `Transmission (${listing.transmission ?? 'n/a'})`, delta: Math.round(base * (transFactor - 1)) });
-
-  const modsFactor = modsWeight(listing.mods ?? null);
-  if (modsFactor !== 1) adj.push({ label: 'Mods / upgrades', delta: Math.round(base * (modsFactor - 1)) });
 
   const wearFactor = wearFactorFromHardCosts(listing, segment, base);
   if (wearFactor !== 1) adj.push({ label: 'Wear / repairs', delta: Math.round(base * (wearFactor - 1)) });

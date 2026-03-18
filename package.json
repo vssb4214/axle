@@ -10,6 +10,7 @@
     "seed": "node scripts/seed.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check": "pnpm -s lint && pnpm -s build",
     "watchlists:smoke": "node scripts/watchlists-smoke.cjs"
   },
   "dependencies": {
