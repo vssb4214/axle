@@ -6,6 +6,7 @@ import { filterComparableComps, type ListingInput } from '@/lib/valuation/engine
 import type { NormalizedComp } from '@/lib/valuation/types';
 import { ollamaExplainText } from '@/lib/ollama/client';
 import { CopyLinkButton } from '@/components/reports/CopyLinkButton';
+import { vehicleKeyFromFields } from '@/lib/vin/vehicleKey';
 
 export const dynamic = 'force-dynamic';
 
@@ -106,6 +107,14 @@ export default async function ReportPage({ params }: { params: { id: string } })
     });
   }
 
+  // Build a vehicleKey from stored report fields for variant-level comp matching.
+  const reportVehicleKey = vehicleKeyFromFields({
+    make: data.make,
+    model: data.model,
+    trim: data.trim ?? null,
+    year: data.year,
+  });
+
   // Fetch comps live for transparency. Keep it fast; degrade gracefully.
   let comps: NormalizedComp[] = [];
   let compErrors: { source: string; message: string }[] = [];
@@ -119,7 +128,8 @@ export default async function ReportPage({ params }: { params: { id: string } })
         mileage: data.mileage,
         city: null,
         state: null,
-        zip: null
+        zip: null,
+        vehicleKey: reportVehicleKey,
       }),
       2800
     );
@@ -144,7 +154,8 @@ export default async function ReportPage({ params }: { params: { id: string } })
     mods: data.mods ?? null,
     wear: data.wear ?? null,
     wear_issues: null,
-    wear_costs: null
+    wear_costs: null,
+    vehicleKey: reportVehicleKey,
   };
 
   const compsUsed = comps.length ? filterComparableComps(listingInput, comps).slice(0, 10) : [];

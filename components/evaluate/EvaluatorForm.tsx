@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useRef } from 'react';
 
 type Props = {
+  defaultVin?: string;
   defaultYear?: string;
   defaultMake?: string;
   defaultModel?: string;
@@ -21,6 +22,7 @@ const inputClass =
   'mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand';
 
 export function EvaluatorForm({
+  defaultVin,
   defaultYear,
   defaultMake,
   defaultModel,
@@ -41,10 +43,12 @@ export function EvaluatorForm({
     if (!form) return;
     const fd = new FormData(form);
     const params = new URLSearchParams();
+    const vin = fd.get('vin');
     const year = fd.get('year');
     const make = fd.get('make');
     const model = fd.get('model');
     const mileage = fd.get('mileage');
+    if (vin) params.set('vin', String(vin));
     if (year) params.set('year', String(year));
     if (make) params.set('make', String(make));
     if (model) params.set('model', String(model));
@@ -64,7 +68,6 @@ export function EvaluatorForm({
     if (wear) params.set('wear', String(wear));
     if (zip) params.set('zip', String(zip));
 
-    // Prefer client-side navigation when JS is healthy; otherwise the plain GET submit still works.
     if (e?.preventDefault) {
       e.preventDefault();
     }
@@ -79,6 +82,18 @@ export function EvaluatorForm({
       method="get"
       className="card space-y-4 p-6"
     >
+      <div>
+        <label htmlFor="vin" className="block text-xs font-medium text-slate-300">VIN <span className="text-slate-500">(optional — auto-fills year/make/model/trim)</span></label>
+        <input
+          id="vin"
+          name="vin"
+          type="text"
+          defaultValue={defaultVin}
+          maxLength={17}
+          className={inputClass}
+          placeholder="e.g. WBACN33454LM81234"
+        />
+      </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="year" className="block text-xs font-medium text-slate-300">Year *</label>

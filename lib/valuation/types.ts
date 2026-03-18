@@ -13,6 +13,8 @@ export type NormalizedComp = {
   condition: string | null;
   mods: string | null;
   posted_at?: string | null;
+  /** Normalized vehicle key for variant-level matching (set when VIN-derived data is available). */
+  vehicleKey?: string | null;
 };
 
 export type ValuationResult = {

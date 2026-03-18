@@ -11,6 +11,8 @@ import { logManualValuation } from '@/lib/valuation/logManualValuation';
 import { getCurrentUser } from '@/lib/auth/server';
 import { EvaluatorForm } from '@/components/evaluate/EvaluatorForm';
 import { EvaluatorResults } from '@/components/evaluate/EvaluatorResults';
+import { decodeVinNhtsa } from '@/lib/vin/nhtsa';
+import { vehicleKeyFromDecode } from '@/lib/vin/vehicleKey';
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -29,6 +31,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 type SearchParams = {
+  vin?: string;
   year?: string;
   make?: string;
   model?: string;
@@ -47,9 +50,28 @@ export default async function EvaluatePage({
 }: {
   searchParams: SearchParams;
 }) {
-  const year = searchParams?.year ? parseInt(searchParams.year, 10) : 0;
-  const make = (searchParams?.make ?? '').trim();
-  const model = (searchParams?.model ?? '').trim();
+  // VIN decode: when a VIN is provided, decode it and use the result to fill/override fields.
+  const rawVin = (searchParams?.vin ?? '').trim();
+  let vinDecode: Awaited<ReturnType<typeof decodeVinNhtsa>> | null = null;
+  let vehicleKey: string | null = null;
+  let vinError: string | null = null;
+
+  if (rawVin) {
+    vinDecode = await decodeVinNhtsa(rawVin);
+    if (vinDecode.errorText && !vinDecode.make) {
+      vinError = vinDecode.errorText;
+      vinDecode = null;
+    } else {
+      vehicleKey = vehicleKeyFromDecode(vinDecode);
+    }
+  }
+
+  // VIN-decoded fields override manual params when available.
+  // Use the raw NHTSA strings (not lowercased) so source APIs get proper casing.
+  const year = vinDecode?.modelYear ?? (searchParams?.year ? parseInt(searchParams.year, 10) : 0);
+  const make = vinDecode?.make ?? (searchParams?.make ?? '').trim();
+  const model = vinDecode?.model ?? (searchParams?.model ?? '').trim();
+  const trim = vinDecode?.trim || (searchParams?.trim?.trim() || null);
   const mileage = searchParams?.mileage ? parseInt(searchParams.mileage, 10) : 0;
 
   const hasQuery = year > 0 && make && model && mileage > 0;
@@ -65,12 +87,12 @@ export default async function EvaluatePage({
       year,
       make,
       model,
-      trim: searchParams?.trim?.trim() || null,
+      trim: trim ?? null,
       mileage,
       city: null,
       state: null,
       zip: searchParams?.zip?.trim() || null,
-      radius_miles: null
+      vehicleKey,
     };
     try {
       const compResult = await collectComparableListings(query);
@@ -85,7 +107,7 @@ export default async function EvaluatePage({
       year,
       make,
       model,
-      trim: searchParams?.trim?.trim() || null,
+      trim: trim ?? null,
       mileage,
       city: null,
       state: null,
@@ -95,7 +117,8 @@ export default async function EvaluatePage({
       mods: searchParams?.mods?.trim() || null,
       wear: searchParams?.wear?.trim() || null,
       wear_issues: null as null | IssueCode[],
-      wear_costs: null as null | { label: string; parts_cost: number; labor_hours: number; category: string }[]
+      wear_costs: null as null | { label: string; parts_cost: number; labor_hours: number; category: string }[],
+      vehicleKey,
     };
 
     // Optional: use Ollama extraction model to map arbitrary wear text into standardized issues.
@@ -153,7 +176,8 @@ export default async function EvaluatePage({
           ollamaFilterCompatibleComps({
             listingTitle: title,
             listingTrim: listingInput.trim ?? null,
-            comps: compsUsedForValuation
+            comps: compsUsedForValuation,
+            vehicleKey,
           }),
           1800
         );
@@ -213,7 +237,7 @@ export default async function EvaluatePage({
         year,
         make,
         model,
-        trim: searchParams?.trim?.trim() || null,
+        trim: trim ?? null,
         mileage,
         condition: searchParams?.condition?.trim() || null,
         transmission: searchParams?.transmission?.trim() || null,
@@ -242,10 +266,11 @@ export default async function EvaluatePage({
       </div>
 
       <EvaluatorForm
-        defaultYear={searchParams?.year}
-        defaultMake={searchParams?.make}
-        defaultModel={searchParams?.model}
-        defaultTrim={searchParams?.trim}
+        defaultVin={searchParams?.vin}
+        defaultYear={vinDecode?.modelYear ? String(vinDecode.modelYear) : searchParams?.year}
+        defaultMake={vinDecode?.make || searchParams?.make}
+        defaultModel={vinDecode?.model || searchParams?.model}
+        defaultTrim={vinDecode?.trim || searchParams?.trim}
         defaultMileage={searchParams?.mileage}
         defaultCondition={searchParams?.condition}
         defaultTransmission={searchParams?.transmission}
@@ -254,6 +279,21 @@ export default async function EvaluatePage({
         defaultMods={searchParams?.mods}
         defaultWear={searchParams?.wear}
       />
+
+      {vinError && (
+        <div className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">
+          VIN decode warning: {vinError}
+        </div>
+      )}
+
+      {vehicleKey && (
+        <div className="rounded-lg bg-slate-800/60 p-3 text-xs text-slate-400">
+          VIN-derived vehicle key: <code className="text-slate-300">{vehicleKey}</code>
+          {vinDecode?.driveType && <span className="ml-2">· {vinDecode.driveType}</span>}
+          {vinDecode?.engineDisplacementL && <span className="ml-2">· {vinDecode.engineDisplacementL}L</span>}
+          {vinDecode?.engineCylinders && <span className="ml-2">· {vinDecode.engineCylinders}-cyl</span>}
+        </div>
+      )}
 
       {hasQuery && (
         <EvaluatorResults

@@ -21,6 +21,8 @@ type ListingQuery = {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  /** VIN-derived normalized key for variant-level comp filtering. */
+  vehicleKey?: string | null;
 };
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
