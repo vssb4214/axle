@@ -40,3 +40,5 @@ next-env.d.ts
 
 # local screenshots
 axle_safari.png
+# Keep artifacts out of git
+artifacts/
