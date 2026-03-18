@@ -6,6 +6,7 @@ import { ollamaExplainText } from '@/lib/ollama/client';
 import { ollamaRefineValuation } from '@/lib/ollama/refineValuation';
 import { extractIssuesFromText } from '@/lib/ollama/extractIssues';
 import { extractWearCostsFromText } from '@/lib/ollama/extractWearCosts';
+import { extractConditionProfile } from '@/lib/ollama/extractConditionProfile';
 import { ollamaFilterCompatibleComps } from '@/lib/ollama/filterComps';
 import { logManualValuation } from '@/lib/valuation/logManualValuation';
 import { getCurrentUser } from '@/lib/auth/server';
@@ -95,7 +96,8 @@ export default async function EvaluatePage({
       mods: searchParams?.mods?.trim() || null,
       wear: searchParams?.wear?.trim() || null,
       wear_issues: null as null | IssueCode[],
-      wear_costs: null as null | { label: string; parts_cost: number; labor_hours: number; category: string }[]
+      wear_costs: null as null | { label: string; parts_cost: number; labor_hours: number; category: string }[],
+      conditionProfile: null as null | Awaited<ReturnType<typeof extractConditionProfile>>
     };
 
     // Optional: use Ollama extraction model to map arbitrary wear text into standardized issues.
@@ -138,6 +140,25 @@ export default async function EvaluatePage({
         listingInput.wear_costs = items.length > 0 ? items : null;
       } catch {
         listingInput.wear_costs = null;
+      }
+    }
+
+    // Extract structured condition profile from combined condition/wear/mods text.
+    const profileText = [
+      listingInput.condition ? `Overall condition: ${listingInput.condition}` : '',
+      listingInput.wear ? `Wear/issues: ${listingInput.wear}` : '',
+      listingInput.mods ? `Modifications: ${listingInput.mods}` : '',
+    ].filter(Boolean).join('\n');
+
+    if (profileText) {
+      try {
+        const profile = await withTimeout(
+          extractConditionProfile({ rawText: profileText, year, make, model }),
+          2000
+        );
+        if (profile) listingInput.conditionProfile = profile;
+      } catch {
+        // Profile extraction is optional; fall back to string-based scoring.
       }
     }
 
