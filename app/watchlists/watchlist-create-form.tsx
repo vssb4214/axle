@@ -110,7 +110,7 @@ export default function WatchlistCreateForm({ action, disabled }: Props) {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
-          <label className="block text-xs font-medium text-slate-300">Max mileage</label>
+          <label className="block text-xs font-medium text-slate-300">Max mileage (optional)</label>
           <input
             name="max_mileage"
             type="number"
@@ -121,7 +121,7 @@ export default function WatchlistCreateForm({ action, disabled }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-300">Max price ($)</label>
+          <label className="block text-xs font-medium text-slate-300">Max price ($, optional)</label>
           <input
             name="max_price"
             type="number"
@@ -132,7 +132,7 @@ export default function WatchlistCreateForm({ action, disabled }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-300">ZIP</label>
+          <label className="block text-xs font-medium text-slate-300">ZIP (optional)</label>
           <input
             name="zip"
             inputMode="numeric"
@@ -141,7 +141,7 @@ export default function WatchlistCreateForm({ action, disabled }: Props) {
             className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
             placeholder="92101"
           />
-          <p className="mt-1 text-[11px] text-slate-500">US 5-digit ZIP.</p>
+          <p className="mt-1 text-[11px] text-slate-500">US 5-digit ZIP. Leave blank for nationwide.</p>
         </div>
       </div>
 
