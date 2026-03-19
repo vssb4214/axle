@@ -11,6 +11,7 @@ type ListingQuery = {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  radius_miles?: number | null;
 };
 
 const MARKETCHECK_BASE_URL = process.env.MARKETCHECK_BASE_URL || 'https://api.marketcheck.com/v2';
@@ -134,7 +135,7 @@ async function fetchMarketCheckEndpoint(
 ): Promise<NormalizedComp[]> {
   if (!MARKETCHECK_API_KEY) return [];
 
-  const key = `${endpointPath}|${listing.year}|${listing.make}|${listing.model}|${listing.trim ?? ''}|${listing.state ?? ''}|${listing.zip ?? ''}`;
+  const key = `${endpointPath}|${listing.year}|${listing.make}|${listing.model}|${listing.trim ?? ''}|${listing.state ?? ''}|${listing.zip ?? ''}|${listing.radius_miles ?? ''}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
   if (Date.now() < rateLimitedUntil) {
@@ -159,8 +160,13 @@ async function fetchMarketCheckEndpoint(
   if (listing.state) params.state = listing.state;
   if (listing.zip) {
     params.zip = listing.zip;
-    // MarketCheck behaves much better with zip+radius; default to 100mi (plan max).
-    params.radius = 100;
+    // MarketCheck behaves much better with zip+radius.
+    // Free plans often cap this at 100, so clamp safely.
+    const desiredRadius =
+      typeof listing.radius_miles === 'number' && Number.isFinite(listing.radius_miles)
+        ? Math.max(10, Math.min(100, Math.round(listing.radius_miles)))
+        : 100;
+    params.radius = desiredRadius;
   }
 
   const res = await axios.get(url, {

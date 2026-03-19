@@ -29,7 +29,8 @@ export async function GET(req: Request) {
     // In production this should be protected (cron secret, internal auth, etc).
     // Safety: refuse to run unless explicitly in local/dev mode.
     const env = process.env.AXLE_ENV;
-    if (env !== 'local' && env !== 'dev') {
+    const isDevNode = process.env.NODE_ENV !== 'production';
+    if (env !== 'local' && env !== 'dev' && !isDevNode) {
       throw new HttpError(`Watchlists runner is disabled outside local/dev (AXLE_ENV=${env ?? 'unset'}).`, {
         status: 403,
         code: 'RUNNER_DISABLED'
@@ -75,14 +76,19 @@ export async function GET(req: Request) {
           make: w.make,
           model: w.model,
           trim: w.trim,
-          mileage: w.max_mileage ?? null,
+          mileage: null,
           zip: w.zip,
+          radius_miles: w.radius_miles ?? null,
           city: null,
           state: null
         });
 
-        // Runner stub: "alert condition" is simply comps under max_price, optionally respecting max_mileage.
-        const matches = (w.max_price ? comps.filter((c) => (c.asking_price ?? Infinity) <= w.max_price!) : []).filter((c) =>
+        // Runner stub: if max_price is set, only include comps under target.
+        // If not set, include all comps (useful for broad "new listings" watchlists).
+        const priceFiltered = w.max_price != null
+          ? comps.filter((c) => c.asking_price != null && c.asking_price <= w.max_price!)
+          : comps;
+        const matches = priceFiltered.filter((c) =>
           w.max_mileage && c.mileage != null ? c.mileage <= w.max_mileage : true
         );
 

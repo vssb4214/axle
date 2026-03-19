@@ -126,6 +126,33 @@ function modelMatches(listingModel: string, compModel: string, listingTrim?: str
   return false;
 }
 
+function isLikelyGenerationMismatch(listing: ListingInput, comp: NormalizedComp): boolean {
+  const make = norm(listing.make);
+  const model = norm(listing.model);
+  const listingText = `${listing.model ?? ''} ${listing.trim ?? ''}`.toLowerCase();
+  const compText = `${comp.model ?? ''} ${comp.trim ?? ''} ${comp.source_title ?? ''}`.toLowerCase();
+
+  // BMW has several generation naming shifts (e.g. Z4 3.0i -> sDrive30i).
+  // Use naming-family + year signal to avoid mixing clear cross-gen variants.
+  if (make === 'bmw') {
+    const listingHasDriveSuffix = /\b[is]?(x|s)?drive\d{2}i?\b|\bsdrive\b|\bxdrive\b/.test(listingText);
+    const compHasDriveSuffix = /\b[is]?(x|s)?drive\d{2}i?\b|\bsdrive\b|\bxdrive\b/.test(compText);
+    if (listingHasDriveSuffix !== compHasDriveSuffix && comp.year != null) {
+      if (Math.abs(comp.year - listing.year) >= 3) return true;
+    }
+
+    if (model === 'z4') {
+      // Extra protection for Z4: E85/E86 era vs later sDrive-era.
+      if (listing.year <= 2008 && /\bsdrive\b|\bxdrive\b/.test(compText)) return true;
+      if (listing.year >= 2009 && /\b2\.5i\b|\b3\.0i\b/.test(compText) && !/\bsdrive\b|\bxdrive\b/.test(compText)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export function filterComparableComps(listing: ListingInput, comps: NormalizedComp[]): NormalizedComp[] {
   const listingText = `${listing.trim ?? ''} ${listing.mods ?? ''} ${listing.wear ?? ''}`.toLowerCase();
   const wantsMobility = /\bmobility\b|wheelchair|handicap|accessible/.test(listingText);
@@ -137,19 +164,27 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
   const listingVehicleKey = normalizeVehicleKey(listing.vehicleKey);
   const normalizedListingMake = norm(listing.make);
   const listingTrim = listing.trim ?? null;
+  const TARGET_MIN_FILTERED = 6;
 
-  const filtered = comps.filter((c) => {
+  const runPass = (opts: {
+    yearWindow: number;
+    mileageWindow: number;
+    requireTrimCompat: boolean;
+    displacementToleranceLiters: number;
+  }) =>
+    comps.filter((c) => {
     if (!c.asking_price || !c.year) return false;
     if (!c.make || norm(c.make) !== normalizedListingMake) return false;
     if (!c.model || !modelMatches(listing.model, c.model, listing.trim, c.trim)) return false;
+    if (isLikelyGenerationMismatch(listing, c)) return false;
 
     const compVehicleKey = normalizeVehicleKey(c.vehicleKey);
     const keyMatch = Boolean(listingVehicleKey && compVehicleKey && listingVehicleKey === compVehicleKey);
     const trimCompatible = trimsAreCompatible(listingTrim, c.trim ?? null);
-    if (!trimCompatible && !keyMatch) return false;
+    if (opts.requireTrimCompat && !trimCompatible && !keyMatch) return false;
 
-    if (Math.abs(c.year - listing.year) > yearWindow) return false;
-    if (c.mileage != null && Number.isFinite(c.mileage) && Math.abs(c.mileage - listing.mileage) > mileageWindow) {
+    if (Math.abs(c.year - listing.year) > opts.yearWindow) return false;
+    if (c.mileage != null && Number.isFinite(c.mileage) && Math.abs(c.mileage - listing.mileage) > opts.mileageWindow) {
       return false;
     }
 
@@ -161,10 +196,72 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
     // Generic engine-variant guard: when both imply a displacement, require close match.
     if (listingDisp != null) {
       const compDisp = extractDisplacementLiters(`${c.model ?? ''} ${c.trim ?? ''} ${c.source_title ?? ''}`);
-      if (compDisp != null && Math.abs(compDisp - listingDisp) >= 0.4) return false;
+      if (compDisp != null && Math.abs(compDisp - listingDisp) >= opts.displacementToleranceLiters) return false;
     }
     return true;
   });
+
+  // Start strict, then relax in controlled steps if we are starving for comps.
+  // This improves availability in thin markets without throwing away variant checks.
+  let filtered = runPass({
+    yearWindow,
+    mileageWindow,
+    requireTrimCompat: true,
+    displacementToleranceLiters: 0.4
+  });
+
+  if (filtered.length < TARGET_MIN_FILTERED) {
+    filtered = runPass({
+      yearWindow: yearWindow + 1,
+      mileageWindow: mileageWindow + 25_000,
+      requireTrimCompat: false,
+      displacementToleranceLiters: 0.4
+    });
+  }
+
+  if (filtered.length < TARGET_MIN_FILTERED) {
+    filtered = runPass({
+      yearWindow: yearWindow + 2,
+      mileageWindow: mileageWindow + 50_000,
+      requireTrimCompat: false,
+      displacementToleranceLiters: 0.4
+    });
+  }
+
+  if (filtered.length < TARGET_MIN_FILTERED) {
+    filtered = runPass({
+      yearWindow: yearWindow + 4,
+      mileageWindow: mileageWindow + 80_000,
+      requireTrimCompat: false,
+      displacementToleranceLiters: 0.4
+    });
+  }
+  if (filtered.length < TARGET_MIN_FILTERED) {
+    filtered = runPass({
+      yearWindow: yearWindow + 8,
+      mileageWindow: mileageWindow + 120_000,
+      requireTrimCompat: false,
+      displacementToleranceLiters: 0.4
+    });
+  }
+  if (filtered.length < TARGET_MIN_FILTERED) {
+    filtered = runPass({
+      yearWindow: yearWindow + 12,
+      mileageWindow: mileageWindow + 180_000,
+      requireTrimCompat: false,
+      displacementToleranceLiters: 0.4
+    });
+  }
+  // Last resort for very thin markets: allow adjacent displacement variants only when we do not
+  // have a VIN-derived vehicle key and we could not infer displacement from user input.
+  if (filtered.length < 3 && !listingVehicleKey && listingDisp == null) {
+    filtered = runPass({
+      yearWindow: yearWindow + 12,
+      mileageWindow: mileageWindow + 180_000,
+      requireTrimCompat: false,
+      displacementToleranceLiters: 0.8
+    });
+  }
 
   if (!listingVehicleKey) return filtered;
 

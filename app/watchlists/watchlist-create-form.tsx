@@ -86,12 +86,13 @@ export default function WatchlistCreateForm({ action, disabled }: Props) {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="block text-xs font-medium text-slate-300">Year (optional)</label>
+          <label className="block text-xs font-medium text-slate-300">Year *</label>
           <input
             name="year"
             type="number"
             min={1900}
             max={new Date().getFullYear() + 1}
+            required
             disabled={disabled}
             className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
             placeholder="2012"
@@ -146,7 +147,7 @@ export default function WatchlistCreateForm({ action, disabled }: Props) {
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-slate-300">Radius (miles)</label>
+        <label className="block text-xs font-medium text-slate-300">Radius (miles, optional)</label>
         <input
           name="radius_miles"
           type="number"
@@ -156,6 +157,7 @@ export default function WatchlistCreateForm({ action, disabled }: Props) {
           className="mt-1 w-40 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
           placeholder="200"
         />
+        <p className="mt-1 text-[11px] text-slate-500">Radius is used only when ZIP is set.</p>
       </div>
 
       <SubmitButton />

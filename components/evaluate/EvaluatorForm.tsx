@@ -21,6 +21,17 @@ type Props = {
 const inputClass =
   'mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand';
 
+type VinDecodeState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | {
+      kind: 'success';
+      message: string;
+      vehicleKey?: string | null;
+      decoded: { modelYear?: number; make?: string; model?: string; trim?: string };
+    };
+
 export function EvaluatorForm({
   defaultVin,
   defaultYear,
@@ -37,24 +48,31 @@ export function EvaluatorForm({
 }: Props) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
-  const [vinDecodeStatus, setVinDecodeStatus] = useState<{ kind: 'idle' | 'loading' | 'error'; message?: string }>({ kind: 'idle' });
+  const [vinDecodeStatus, setVinDecodeStatus] = useState<VinDecodeState>({ kind: 'idle' });
 
   async function handleDecodeVin() {
     const form = formRef.current;
     if (!form) return;
     const fd = new FormData(form);
-    const vin = String(fd.get('vin') ?? '').trim();
-    if (!vin) return;
+    const vinRaw = String(fd.get('vin') ?? '').trim();
+    const vin = vinRaw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!vin) {
+      setVinDecodeStatus({ kind: 'error', message: 'Enter a VIN first.' });
+      return;
+    }
+    const vinEl = form.querySelector<HTMLInputElement>('#vin');
+    if (vinEl) vinEl.value = vin;
     setVinDecodeStatus({ kind: 'loading' });
-    if (process.env.NODE_ENV !== 'production') console.log('VIN_DECODE_CLICK', vin);
     try {
       const res = await fetch(`/api/vin/decode?vin=${encodeURIComponent(vin)}`);
+      const payload = await res.json().catch(() => null);
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `VIN decode failed (${res.status})`);
+        throw new Error(payload?.error || `VIN decode failed (${res.status})`);
       }
-      const data = await res.json();
-      const decoded = data?.decoded ?? data;
+      const decoded = payload?.decoded ?? payload?.data ?? null;
+      if (!decoded) {
+        throw new Error('VIN decoded, but no vehicle details were returned.');
+      }
       // Only fill fields when present; never clear user input.
       const year = decoded?.modelYear ?? decoded?.year;
       const make = decoded?.make;
@@ -71,9 +89,25 @@ export function EvaluatorForm({
       if (model && modelEl) modelEl.value = String(model);
       if (trim && trimEl) trimEl.value = String(trim);
 
-      setVinDecodeStatus({ kind: 'idle' });
+      const summary = [year ? String(year) : null, make ? String(make) : null, model ? String(model) : null]
+        .filter(Boolean)
+        .join(' ');
+      setVinDecodeStatus({
+        kind: 'success',
+        message: summary ? `Decoded ${summary}${trim ? ` ${trim}` : ''}` : 'VIN decoded.',
+        decoded: {
+          modelYear: year ? Number(year) : undefined,
+          make: make ? String(make) : undefined,
+          model: model ? String(model) : undefined,
+          trim: trim ? String(trim) : undefined
+        },
+        vehicleKey: payload?.vehicleKey ?? null
+      });
     } catch (e: any) {
-      setVinDecodeStatus({ kind: 'error', message: e?.message ? String(e.message) : 'VIN decode failed' });
+      setVinDecodeStatus({
+        kind: 'error',
+        message: e?.message ? String(e.message) : 'VIN decode failed'
+      });
     }
   }
 
@@ -144,8 +178,23 @@ export function EvaluatorForm({
           className={inputClass}
           placeholder="e.g. WBACN33454LM81234"
         />
+        <p className="mt-1 text-[11px] text-slate-500">
+          Tip: paste a 17-character VIN to auto-fill key fields.
+        </p>
         {vinDecodeStatus.kind === 'error' && (
-          <p className="mt-2 text-xs text-rose-300">{vinDecodeStatus.message ?? 'VIN decode failed.'}</p>
+          <div className="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+            {vinDecodeStatus.message}
+          </div>
+        )}
+        {vinDecodeStatus.kind === 'success' && (
+          <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+            <div className="font-medium">{vinDecodeStatus.message}</div>
+            {vinDecodeStatus.vehicleKey ? (
+              <div className="mt-1 break-all text-[10px] text-emerald-200/90">
+                Vehicle key: {vinDecodeStatus.vehicleKey}
+              </div>
+            ) : null}
+          </div>
         )}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">

@@ -21,7 +21,7 @@ type RunnerResponse = {
 function canShowRunner() {
   // Client-side safe check (also enforced server-side in the API route)
   const env = process.env.NEXT_PUBLIC_AXLE_ENV;
-  return env === 'local' || env === 'dev';
+  return env === 'local' || env === 'dev' || process.env.NODE_ENV !== 'production';
 }
 
 export default function RunAlertsPanel() {

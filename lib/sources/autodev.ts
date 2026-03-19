@@ -5,6 +5,7 @@ type ListingQuery = {
   year: number;
   make: string;
   model: string;
+  year_window?: number | null;
   trim?: string | null;
   city?: string | null;
   state?: string | null;
@@ -123,9 +124,12 @@ export async function fetchAutoDevComps(listing: ListingQuery): Promise<Normaliz
     // Per docs: use vehicle.* filters, not bare make/model.
     'vehicle.make': make,
     'vehicle.model': model,
-    'vehicle.year': `${Math.max(1980, listing.year - 3)}-${listing.year + 3}`,
     limit: 50
   };
+  if (listing.year_window != null) {
+    const yearWindow = Math.max(1, Math.round(listing.year_window));
+    params['vehicle.year'] = `${Math.max(1980, listing.year - yearWindow)}-${listing.year + yearWindow}`;
+  }
   // Prefer some locality if zip is present (if the API supports it, it will help; otherwise ignored).
   if (listing.zip) params.zip = listing.zip;
 

@@ -28,15 +28,22 @@ export async function createWatchlist(formData: FormData) {
     min: 1900,
     max: new Date().getFullYear() + 1
   });
+  if (!year) throw new Error('Year is required.');
+
   const maxMileage = clampInt(parseOptionalInt(formData.get('max_mileage')), { min: 0, max: 1_000_000 });
   const radius = clampInt(parseOptionalInt(formData.get('radius_miles')), { min: 1, max: 500 });
   const maxPrice = clampInt(parseOptionalInt(formData.get('max_price')), { min: 0, max: 10_000_000 });
 
   const trim = formData.get('trim')?.toString().trim() || null;
-  const zip = formData.get('zip')?.toString().trim() || null;
+  const zipRaw = formData.get('zip')?.toString().trim() || null;
+  const zip = zipRaw ? zipRaw.replace(/\D/g, '') : null;
 
   if (zip && !/^[0-9]{5}$/.test(zip)) {
     throw new Error('ZIP must be a 5-digit US ZIP code.');
+  }
+
+  if (!zip && radius) {
+    throw new Error('Radius requires a ZIP code.');
   }
 
   const supabase = await getSupabaseServer();

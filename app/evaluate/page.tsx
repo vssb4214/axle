@@ -10,6 +10,8 @@ import { extractConditionProfile } from '@/lib/ollama/extractConditionProfile';
 import { ollamaFilterCompatibleComps } from '@/lib/ollama/filterComps';
 import { logManualValuation } from '@/lib/valuation/logManualValuation';
 import { getCurrentUser } from '@/lib/auth/server';
+import { decodeVinNhtsa } from '@/lib/vin/nhtsa';
+import { vehicleKeyFromDecode } from '@/lib/vin/vehicleKey';
 import { EvaluatorForm } from '@/components/evaluate/EvaluatorForm';
 import { EvaluatorResults } from '@/components/evaluate/EvaluatorResults';
 
@@ -30,6 +32,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 type SearchParams = {
+  vin?: string;
   year?: string;
   make?: string;
   model?: string;
@@ -49,6 +52,7 @@ export default async function EvaluatePage({
   searchParams: SearchParams;
 }) {
   const year = searchParams?.year ? parseInt(searchParams.year, 10) : 0;
+  const vin = (searchParams?.vin ?? '').trim().toUpperCase();
   const make = (searchParams?.make ?? '').trim();
   const model = (searchParams?.model ?? '').trim();
   const mileage = searchParams?.mileage ? parseInt(searchParams.mileage, 10) : 0;
@@ -97,8 +101,20 @@ export default async function EvaluatePage({
       wear: searchParams?.wear?.trim() || null,
       wear_issues: null as null | IssueCode[],
       wear_costs: null as null | { label: string; parts_cost: number; labor_hours: number; category: string }[],
-      conditionProfile: null as null | Awaited<ReturnType<typeof extractConditionProfile>>
+      conditionProfile: null as null | Awaited<ReturnType<typeof extractConditionProfile>>,
+      vehicleKey: null as string | null
     };
+
+    if (vin) {
+      try {
+        const decoded = await withTimeout(decodeVinNhtsa(vin), 1800);
+        if (decoded?.make && decoded?.model && decoded?.modelYear) {
+          listingInput.vehicleKey = vehicleKeyFromDecode(decoded);
+        }
+      } catch {
+        // VIN decode is optional; fall back to non-VIN matching.
+      }
+    }
 
     // Optional: use Ollama extraction model to map arbitrary wear text into standardized issues.
     // This keeps behavior robust even when regex rules don't cover a phrase like "cracked head light".
@@ -162,7 +178,7 @@ export default async function EvaluatePage({
       }
     }
 
-    const baseValuation = computeDeterministicValuation(listingInput, comps) ?? computeFallbackValuation(listingInput);
+    let baseValuation = computeDeterministicValuation(listingInput, comps) ?? computeFallbackValuation(listingInput);
     compsUsedForValuation = comps.length > 0 ? filterComparableComps(listingInput, comps) : [];
 
     // Optional: let the LLM decide which comps are the same variant (engine/displacement/package),
@@ -185,6 +201,19 @@ export default async function EvaluatePage({
       } catch {
         // ignore
       }
+    }
+
+    // If strict variant matching leaves us with very few comps, damp single-comp skew
+    // by blending with formula fallback instead of trusting one listing too heavily.
+    if (baseValuation && compsUsedForValuation.length > 0 && compsUsedForValuation.length < 3) {
+      const fallback = computeFallbackValuation(listingInput);
+      baseValuation = {
+        ...baseValuation,
+        value_low: Math.round(baseValuation.value_low * 0.7 + fallback.value_low * 0.3),
+        value_mid: Math.round(baseValuation.value_mid * 0.7 + fallback.value_mid * 0.3),
+        value_high: Math.round(baseValuation.value_high * 0.7 + fallback.value_high * 0.3),
+        confidence: Math.max(0.25, Math.min(0.7, baseValuation.confidence * 0.85))
+      };
     }
 
     if (baseValuation) {
@@ -263,6 +292,7 @@ export default async function EvaluatePage({
       </div>
 
       <EvaluatorForm
+        defaultVin={searchParams?.vin}
         defaultYear={searchParams?.year}
         defaultMake={searchParams?.make}
         defaultModel={searchParams?.model}
