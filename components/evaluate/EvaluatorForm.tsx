@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 
 type Props = {
   defaultVin?: string;
@@ -37,6 +37,44 @@ export function EvaluatorForm({
 }: Props) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const [vinDecodeStatus, setVinDecodeStatus] = useState<{ kind: 'idle' | 'loading' | 'error'; message?: string }>({ kind: 'idle' });
+
+  async function handleDecodeVin() {
+    const form = formRef.current;
+    if (!form) return;
+    const fd = new FormData(form);
+    const vin = String(fd.get('vin') ?? '').trim();
+    if (!vin) return;
+    setVinDecodeStatus({ kind: 'loading' });
+    try {
+      const res = await fetch(`/api/vin/decode?vin=${encodeURIComponent(vin)}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `VIN decode failed (${res.status})`);
+      }
+      const data = await res.json();
+      const decoded = data?.decoded ?? data;
+      // Only fill fields when present; never clear user input.
+      const year = decoded?.modelYear ?? decoded?.year;
+      const make = decoded?.make;
+      const model = decoded?.model;
+      const trim = decoded?.trim;
+
+      const yearEl = form.querySelector<HTMLInputElement>('#year');
+      const makeEl = form.querySelector<HTMLInputElement>('#make');
+      const modelEl = form.querySelector<HTMLInputElement>('#model');
+      const trimEl = form.querySelector<HTMLInputElement>('#trim');
+
+      if (year && yearEl && !yearEl.value) yearEl.value = String(year);
+      if (make && makeEl && !makeEl.value) makeEl.value = String(make);
+      if (model && modelEl && !modelEl.value) modelEl.value = String(model);
+      if (trim && trimEl && !trimEl.value) trimEl.value = String(trim);
+
+      setVinDecodeStatus({ kind: 'idle' });
+    } catch (e: any) {
+      setVinDecodeStatus({ kind: 'error', message: e?.message ? String(e.message) : 'VIN decode failed' });
+    }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     const form = formRef.current;
@@ -83,7 +121,19 @@ export function EvaluatorForm({
       className="card space-y-4 p-6"
     >
       <div>
-        <label htmlFor="vin" className="block text-xs font-medium text-slate-300">VIN <span className="text-slate-500">(optional — auto-fills year/make/model/trim)</span></label>
+        <div className="flex items-center justify-between gap-3">
+          <label htmlFor="vin" className="block text-xs font-medium text-slate-300">
+            VIN <span className="text-slate-500">(optional — auto-fills year/make/model/trim)</span>
+          </label>
+          <button
+            type="button"
+            onClick={handleDecodeVin}
+            disabled={vinDecodeStatus.kind === 'loading'}
+            className="btn-secondary h-8 px-3 text-xs"
+          >
+            {vinDecodeStatus.kind === 'loading' ? 'Decoding…' : 'Decode VIN'}
+          </button>
+        </div>
         <input
           id="vin"
           name="vin"
@@ -93,6 +143,9 @@ export function EvaluatorForm({
           className={inputClass}
           placeholder="e.g. WBACN33454LM81234"
         />
+        {vinDecodeStatus.kind === 'error' && (
+          <p className="mt-2 text-xs text-rose-300">{vinDecodeStatus.message ?? 'VIN decode failed.'}</p>
+        )}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
