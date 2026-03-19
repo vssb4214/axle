@@ -46,6 +46,7 @@ export function EvaluatorForm({
     const vin = String(fd.get('vin') ?? '').trim();
     if (!vin) return;
     setVinDecodeStatus({ kind: 'loading' });
+    if (process.env.NODE_ENV !== 'production') console.log('VIN_DECODE_CLICK', vin);
     try {
       const res = await fetch(`/api/vin/decode?vin=${encodeURIComponent(vin)}`);
       if (!res.ok) {
@@ -65,10 +66,10 @@ export function EvaluatorForm({
       const modelEl = form.querySelector<HTMLInputElement>('#model');
       const trimEl = form.querySelector<HTMLInputElement>('#trim');
 
-      if (year && yearEl && !yearEl.value) yearEl.value = String(year);
-      if (make && makeEl && !makeEl.value) makeEl.value = String(make);
-      if (model && modelEl && !modelEl.value) modelEl.value = String(model);
-      if (trim && trimEl && !trimEl.value) trimEl.value = String(trim);
+      if (year && yearEl) yearEl.value = String(year);
+      if (make && makeEl) makeEl.value = String(make);
+      if (model && modelEl) modelEl.value = String(model);
+      if (trim && trimEl) trimEl.value = String(trim);
 
       setVinDecodeStatus({ kind: 'idle' });
     } catch (e: any) {
