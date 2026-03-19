@@ -78,6 +78,30 @@ function extractDisplacementLiters(text: string | null | undefined): number | nu
   return null;
 }
 
+function normalizeVehicleKey(key: string | null | undefined): string | null {
+  if (!key) return null;
+  const trimmed = key.trim().toLowerCase();
+  return trimmed || null;
+}
+
+const SEGMENT_YEAR_WINDOW: Record<CarSegment, number> = {
+  sports: 2,
+  luxury_sports: 2,
+  truck: 4,
+  luxury: 3,
+  economy: 3,
+  other: 3
+};
+
+const SEGMENT_MILEAGE_WINDOW: Record<CarSegment, number> = {
+  sports: 80_000,
+  luxury_sports: 90_000,
+  truck: 150_000,
+  luxury: 110_000,
+  economy: 110_000,
+  other: 120_000
+};
+
 function modelMatches(listingModel: string, compModel: string, listingTrim?: string | null, compTrim?: string | null): boolean {
   const lm = norm(listingModel);
   const cm = norm(compModel);
@@ -107,12 +131,28 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
   const wantsMobility = /\bmobility\b|wheelchair|handicap|accessible/.test(listingText);
   const listingDisp = extractDisplacementLiters(`${listing.model ?? ''} ${listing.trim ?? ''}`);
 
-  return comps.filter((c) => {
+  const segment = getCarSegment(listing.make, listing.model);
+  const yearWindow = SEGMENT_YEAR_WINDOW[segment] ?? 3;
+  const mileageWindow = SEGMENT_MILEAGE_WINDOW[segment] ?? 120_000;
+  const listingVehicleKey = normalizeVehicleKey(listing.vehicleKey);
+  const normalizedListingMake = norm(listing.make);
+  const listingTrim = listing.trim ?? null;
+
+  const filtered = comps.filter((c) => {
     if (!c.asking_price || !c.year) return false;
-    if (!c.make || norm(c.make) !== norm(listing.make)) return false;
+    if (!c.make || norm(c.make) !== normalizedListingMake) return false;
     if (!c.model || !modelMatches(listing.model, c.model, listing.trim, c.trim)) return false;
-    if (Math.abs(c.year - listing.year) > 3) return false;
-    if (c.mileage && Math.abs(c.mileage - listing.mileage) > 120_000) return false;
+
+    const compVehicleKey = normalizeVehicleKey(c.vehicleKey);
+    const keyMatch = Boolean(listingVehicleKey && compVehicleKey && listingVehicleKey === compVehicleKey);
+    const trimCompatible = trimsAreCompatible(listingTrim, c.trim ?? null);
+    if (!trimCompatible && !keyMatch) return false;
+
+    if (Math.abs(c.year - listing.year) > yearWindow) return false;
+    if (c.mileage != null && Number.isFinite(c.mileage) && Math.abs(c.mileage - listing.mileage) > mileageWindow) {
+      return false;
+    }
+
     // Mobility conversions can price far above standard trims; exclude unless listing indicates it.
     if (!wantsMobility) {
       const compText = `${c.trim ?? ''} ${c.source_title ?? ''}`.toLowerCase();
@@ -124,6 +164,15 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
       if (compDisp != null && Math.abs(compDisp - listingDisp) >= 0.4) return false;
     }
     return true;
+  });
+
+  if (!listingVehicleKey) return filtered;
+
+  return filtered.sort((a, b) => {
+    const aMatch = normalizeVehicleKey(a.vehicleKey) === listingVehicleKey;
+    const bMatch = normalizeVehicleKey(b.vehicleKey) === listingVehicleKey;
+    if (aMatch === bMatch) return 0;
+    return aMatch ? -1 : 1;
   });
 }
 
@@ -303,13 +352,16 @@ function transmissionWeight(transmission: string | null, segment: CarSegment): n
   return 1.0;
 }
 
-function compSourceAskingAdjustment(source: string | null | undefined): number {
-  const s = (source ?? '').toLowerCase();
-  if (s.includes('dealer')) return 0.96;
-  // Auto.dev listings are predominantly dealer retail asking.
-  // Apply a stronger discount to approximate private-party value.
-  if (s === 'autodev') return 0.95;
-  if (s.includes('auction')) return 0.99;
+function compSourceAskingAdjustment(comp: NormalizedComp): number {
+  const source = (comp.source ?? '').toLowerCase();
+  const title = (comp.source_title ?? '').toLowerCase();
+  const combined = `${source} ${title}`;
+
+  const looksDealer = /dealer|dealership|auto sales|motors|certified|cpo|warranty|inventory/.test(combined);
+  if (looksDealer) return 0.94;
+
+  if (source === 'autodev') return 0.95;
+  if (source.includes('auction')) return 0.99;
   return 1.0;
 }
 
@@ -660,7 +712,7 @@ export function computeDeterministicValuation(
   for (const comp of filtered) {
     if (!comp.asking_price || !comp.year) continue;
 
-    let price = comp.asking_price * compSourceAskingAdjustment(comp.source);
+    let price = comp.asking_price * compSourceAskingAdjustment(comp);
 
     if (comp.mileage != null && listing.mileage) {
       price = mileageAdjustment(comp.mileage, listing.mileage, price, segment);
