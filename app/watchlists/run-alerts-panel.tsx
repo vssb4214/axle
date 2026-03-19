@@ -50,10 +50,17 @@ export default function RunAlertsPanel() {
         cache: 'no-store'
       });
 
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        setError(text || `Runner failed (HTTP ${res.status})`);
+        setData(null);
+        return;
+      }
+
       const json = (await res.json()) as RunnerResponse;
       setData(json);
-      if (!res.ok || !json.ok) {
-        setError(json?.error?.message ?? `Runner failed (HTTP ${res.status})`);
+      if (!json.ok) {
+        setError(json?.error?.message ?? 'Runner failed');
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
