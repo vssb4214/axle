@@ -74,3 +74,4 @@ pnpm build
 Notes:
 - `pnpm test` currently runs: lint + build (fast sanity check)
 - `pnpm build` is what matters most for deploy readiness
+- Run `pnpm valuation:regression` after valuation changes to confirm pricing outputs stay within baselines.

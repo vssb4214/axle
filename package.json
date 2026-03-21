@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "pnpm -s lint && pnpm -s build",
-    "watchlists:smoke": "node scripts/watchlists-smoke.cjs"
+    "watchlists:smoke": "node scripts/watchlists-smoke.cjs",
+    "valuation:regression": "node scripts/valuation-regression.mjs"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.10.0",

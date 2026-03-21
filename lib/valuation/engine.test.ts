@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterComparableComps, type ListingInput } from './engine';
+import { filterComparableComps, computeDeterministicValuation, type ListingInput } from './engine';
 import type { NormalizedComp } from './types';
 
 function buildComp(partial: Partial<NormalizedComp>): NormalizedComp {
@@ -55,6 +55,61 @@ describe('filterComparableComps', () => {
     expect(filtered).toHaveLength(2);
     expect(filtered[0]?.vehicleKey).toBe('honda_civic_si_coupe');
     expect(filtered.some((comp) => comp.trim === 'Touring')).toBe(false);
+  });
+
+  it('drops mismatched vehicle keys when there are ample exact matches', () => {
+    const listing: ListingInput = {
+      year: 2019,
+      make: 'Honda',
+      model: 'Civic',
+      trim: 'Si',
+      mileage: 40_000,
+      vehicleKey: 'honda_civic_si_coupe'
+    };
+
+    const comps: NormalizedComp[] = [
+      buildComp({ trim: 'Si', year: 2018, vehicleKey: 'honda_civic_si_coupe', asking_price: 18_300 }),
+      buildComp({ trim: 'Si HPT', year: 2019, vehicleKey: 'honda_civic_si_coupe', asking_price: 18_900 }),
+      buildComp({ trim: 'Si', year: 2020, vehicleKey: 'honda_civic_si_coupe', asking_price: 19_200 }),
+      buildComp({ trim: 'Si', year: 2018, vehicleKey: 'another_key', asking_price: 18_400 })
+    ];
+
+    const filtered = filterComparableComps(listing, comps);
+    expect(filtered).toHaveLength(3);
+    expect(filtered.every((comp) => comp.vehicleKey === 'honda_civic_si_coupe')).toBe(true);
+  });
+
+  it('treats trims with only generic overlaps as incompatible when no vehicle key match', () => {
+    const listing: ListingInput = {
+      year: 2018,
+      make: 'Toyota',
+      model: 'Tacoma',
+      trim: 'TRD Off Road',
+      mileage: 48_000
+    };
+
+    const comps: NormalizedComp[] = [
+      buildComp({
+        make: 'Toyota',
+        model: 'Tacoma',
+        trim: 'TRD Off Road',
+        year: 2017,
+        mileage: 50_000,
+        asking_price: 31_000
+      }),
+      buildComp({
+        make: 'Toyota',
+        model: 'Tacoma',
+        trim: 'TRD Sport',
+        year: 2017,
+        mileage: 46_000,
+        asking_price: 30_500
+      })
+    ];
+
+    const filtered = filterComparableComps(listing, comps);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.trim).toBe('TRD Off Road');
   });
 
   it('applies segment-aware year and mileage windows', () => {
@@ -135,5 +190,29 @@ describe('filterComparableComps', () => {
     const truckFiltered = filterComparableComps(truckListing, truckComps);
     expect(truckFiltered).toHaveLength(2);
     expect(truckFiltered.some((comp) => comp.year === 2010)).toBe(false);
+  });
+});
+
+describe('computeDeterministicValuation', () => {
+  it('applies a confidence penalty when comps are sparse or vehicleKey is missing', () => {
+    const listing: ListingInput = {
+      year: 2018,
+      make: 'Honda',
+      model: 'Civic',
+      trim: 'Si',
+      mileage: 41_000,
+      condition: 'good'
+    };
+
+    const comps: NormalizedComp[] = [
+      buildComp({ year: 2017, mileage: 40_000, asking_price: 19_500, trim: 'Si' }),
+      buildComp({ year: 2018, mileage: 45_000, asking_price: 19_200, trim: 'Si' }),
+      buildComp({ year: 2019, mileage: 38_500, asking_price: 20_200, trim: 'Si' })
+    ];
+
+    const valuation = computeDeterministicValuation(listing, comps);
+    expect(valuation).not.toBeNull();
+    expect(valuation?.comp_count).toBe(3);
+    expect(valuation?.confidence).toBeCloseTo(0.31, 2);
   });
 });

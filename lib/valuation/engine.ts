@@ -265,12 +265,17 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
 
   if (!listingVehicleKey) return filtered;
 
-  return filtered.sort((a, b) => {
+  const sorted = [...filtered].sort((a, b) => {
     const aMatch = normalizeVehicleKey(a.vehicleKey) === listingVehicleKey;
     const bMatch = normalizeVehicleKey(b.vehicleKey) === listingVehicleKey;
     if (aMatch === bMatch) return 0;
     return aMatch ? -1 : 1;
   });
+
+  const matching = sorted.filter((comp) => normalizeVehicleKey(comp.vehicleKey) === listingVehicleKey);
+  if (matching.length >= 3) return matching;
+
+  return sorted;
 }
 
 /**
@@ -368,6 +373,8 @@ function trimWeight(listingTrim: string | null, compTrim: string | null): number
   return Math.max(0.82, Math.min(1.18, factor));
 }
 
+const GENERIC_TRIM_TOKENS = new Set(['trd', 'sport', 'off', 'road', 'package', 'edition', 'series']);
+
 function trimsAreCompatible(listingTrim: string | null, compTrim: string | null): boolean {
   if (!listingTrim || !compTrim) return true;
   const lt = listingTrim.toLowerCase().trim();
@@ -405,10 +412,20 @@ function trimsAreCompatible(listingTrim: string | null, compTrim: string | null)
   const ctTokens = new Set(tokenize(ct));
   if (ltTokens.size === 0 || ctTokens.size === 0) return false;
 
+  const shared: string[] = [];
   for (const t of ltTokens) {
-    if (ctTokens.has(t)) return true;
+    if (ctTokens.has(t)) shared.push(t);
   }
-  return false;
+
+  if (shared.length === 0) return false;
+
+  if (shared.length === 1) {
+    const token = shared[0];
+    const eitherHasMoreDetail = ltTokens.size > 1 || ctTokens.size > 1;
+    if (eitherHasMoreDetail && GENERIC_TRIM_TOKENS.has(token)) return false;
+  }
+
+  return true;
 }
 
 /** Optional mods: desirable keywords slight bump; "none" or empty neutral. */
@@ -781,6 +798,7 @@ export function computeDeterministicValuation(
 ): ValuationResult | null {
   let filtered = filterComparableComps(listing, comps);
   if (!filtered.length) return null;
+  const listingVehicleKey = normalizeVehicleKey(listing.vehicleKey);
 
   const segment = getCarSegment(listing.make, listing.model);
   // When we have a lot of comps (especially after broadening location), keep the most similar.
@@ -802,6 +820,10 @@ export function computeDeterministicValuation(
       })
       .slice(0, 20);
   }
+
+  const matchingVehicleKeyCount = listingVehicleKey
+    ? filtered.filter((comp) => normalizeVehicleKey(comp.vehicleKey) === listingVehicleKey).length
+    : 0;
 
   const adjustedPrices: number[] = [];
   const keyFactors: string[] = [];
@@ -866,9 +888,22 @@ export function computeDeterministicValuation(
   if (compCount >= 10 && relativeSpread < 0.25) confidence = 0.88;
   else if (compCount >= 6 && relativeSpread < 0.32) confidence = 0.72;
   else if (compCount >= 4) confidence = 0.60;
+  if (compCount <= 3) confidence -= 0.12;
+  else if (compCount <= 5) confidence -= 0.05;
+
+  if (!listingVehicleKey) confidence -= 0.05;
+  else if (matchingVehicleKeyCount === 0) confidence -= 0.04;
+  else if (matchingVehicleKeyCount < Math.ceil(compCount * 0.4)) confidence -= 0.02;
+
+  confidence = Math.max(0.2, Math.min(0.95, confidence));
 
   const dollarsPerMile = getMileageDollarsPerMile(segment);
   keyFactors.push(`${compCount} comparables (same make/model, ±3 years).`);
+  if (!listingVehicleKey) {
+    keyFactors.push('Vehicle key missing; relying on trim/segment heuristics for close matches.');
+  } else if (matchingVehicleKeyCount === 0) {
+    keyFactors.push('No comps shared the vehicle key; trim heuristics used as fallback.');
+  }
   keyFactors.push(`Segment: ${segment}. Mileage adjustment: $${dollarsPerMile.toFixed(2)}/mi (varies by segment).`);
   keyFactors.push('Age, trim, region, condition, transmission, mods, and wear/issues applied as weighted adjustments.');
   keyFactors.push('Dealer asking prices are slightly discounted and outliers are trimmed for stability.');
