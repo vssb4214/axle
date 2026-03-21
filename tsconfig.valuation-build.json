@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./scripts/.cache/valuation-build",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "sourceMap": false
+  },
+  "include": [
+    "lib/valuation/**/*.ts",
+    "lib/vehicle/**/*.ts",
+    "lib/sources/**/*.ts"
+  ]
+}

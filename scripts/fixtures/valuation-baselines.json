@@ -1,0 +1,37 @@
+{
+  "bmw_e46_zhp": {
+    "value_low": 5590,
+    "value_mid": 9751,
+    "value_high": 13315,
+    "confidence": 0.55,
+    "comp_count": 4
+  },
+  "wrx_premium_manual": {
+    "value_low": 19633,
+    "value_mid": 21896,
+    "value_high": 24557,
+    "confidence": 0.34,
+    "comp_count": 3
+  },
+  "tacoma_trd_off_road": {
+    "value_low": 15473,
+    "value_mid": 19925,
+    "value_high": 22969,
+    "confidence": 0.51,
+    "comp_count": 5
+  },
+  "lexus_gx470_high_miles": {
+    "value_low": 10456,
+    "value_mid": 12888,
+    "value_high": 15321,
+    "confidence": 0.31,
+    "comp_count": 3
+  },
+  "fallback_elise": {
+    "value_low": 6018,
+    "value_mid": 9258,
+    "value_high": 12498,
+    "confidence": 0.25,
+    "comp_count": 0
+  }
+}

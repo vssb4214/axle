@@ -42,3 +42,4 @@ next-env.d.ts
 axle_safari.png
 # Keep artifacts out of git
 artifacts/
+scripts/.cache/
