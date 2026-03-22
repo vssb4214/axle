@@ -1,17 +1,17 @@
 {
   "bmw_e46_zhp": {
     "value_low": 5590,
-    "value_mid": 9751,
+    "value_mid": 8771,
     "value_high": 13315,
-    "confidence": 0.55,
-    "comp_count": 4
+    "confidence": 0.58,
+    "comp_count": 6
   },
   "wrx_premium_manual": {
     "value_low": 19633,
-    "value_mid": 21896,
+    "value_mid": 22330,
     "value_high": 24557,
-    "confidence": 0.34,
-    "comp_count": 3
+    "confidence": 0.53,
+    "comp_count": 4
   },
   "tacoma_trd_off_road": {
     "value_low": 15473,

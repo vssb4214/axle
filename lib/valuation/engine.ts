@@ -210,6 +210,14 @@ export function filterComparableComps(listing: ListingInput, comps: NormalizedCo
     displacementToleranceLiters: 0.4
   });
 
+  // If we have a VIN-derived vehicleKey and at least one exact-key match, aggressively
+  // prefer those matches. This prevents cross-variant leakage (wrong trims/engines)
+  // even when the overall comp pool is small.
+  if (listingVehicleKey) {
+    const keyMatches = filtered.filter((c) => normalizeVehicleKey(c.vehicleKey) === listingVehicleKey);
+    if (keyMatches.length > 0) filtered = keyMatches;
+  }
+
   if (filtered.length < TARGET_MIN_FILTERED) {
     filtered = runPass({
       yearWindow: yearWindow + 1,
