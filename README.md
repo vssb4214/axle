@@ -79,6 +79,27 @@ pnpm dev
 
 Then open `http://localhost:3000`.
 
+### Work in progress
+
+Last updated: 2026-05-10
+
+Current active work across the project:
+
+- **Diagnostics (OBD-II)**: Live scanner flow is being hardened for mixed adapter types (BLE GATT and Bluetooth Classic/serial fallback), protocol negotiation edge cases, and more reliable PID parsing in real-time streams. Route: `/diagnostics`.
+- **Valuation quality + regression tooling**: Ongoing calibration and harness work is improving consistency of deterministic valuation output and tracking quality changes across fixture suites.
+- **Comps coverage expansion**: Source adapters are being expanded and tuned to improve market coverage while preserving strict explainability and confidence guardrails.
+- **Reliability + observability**: Better failure visibility, clearer transport errors, and safer fallback behavior are being added so users get actionable errors instead of silent failures.
+
+If you pull `main` frequently, expect these areas to evolve rapidly and include incremental UX/behavior changes.
+
+#### Near-term roadmap
+
+- [ ] Stabilize diagnostics transport auto-detection across BLE and serial/SPP adapters.
+- [ ] Add clearer user-facing connection diagnostics for unsupported adapters/browsers.
+- [ ] Finalize valuation calibration pass and refresh regression baselines.
+- [ ] Increase comps source depth while keeping deterministic confidence scoring explainable.
+- [ ] Expand end-to-end smoke coverage for key user flows (evaluate, watchlists, diagnostics).
+
 ### Watchlists
 
 Smoke tests:
